@@ -1,0 +1,25 @@
+[package]
+name = "spacewalk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["David Palmer"]
+description = "A generic basis for square grids, hex grids, and arbitrary grids, with pathfinding"
+repository = "https://github.com/dp88/spacewalk"
+license = "MIT OR Apache-2.0"
+keywords = ["grid", "hex", "pathfinding", "tactics", "gamedev"]
+categories = ["game-development", "data-structures"]
+readme = "README.md"
+exclude = [".github/"]
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dependencies]
+pathfinding = "4"
+serde = { version = "1", features = ["derive"], optional = true }
+
+# For the serde round-trip tests only. serde alone has no format; JSON is the obvious one.
+[dev-dependencies]
+serde_json = "1"
