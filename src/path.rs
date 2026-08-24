@@ -130,20 +130,23 @@ impl<F> Movement<F> {
     where
         F: Fn(Step<B::Cell>) -> Option<Cost>,
     {
-        let costs: Vec<Cost> = g
-            .indices()
-            .flat_map(|from| {
-                g.neighbors(from)
-                    .map(move |(dir, to)| Step { from, to, dir })
-            })
-            .filter_map(&enter)
-            .collect();
-
         let ceiling = cost_ceiling(g.len());
-        if let Some(&worst) = costs.iter().max() {
+        let mut min_step = Cost::MAX;
+        let mut max_step = 0;
+        let mut has_step = false;
+        for from in g.indices() {
+            for (dir, to) in g.neighbors(from) {
+                if let Some(cost) = enter(Step { from, to, dir }) {
+                    has_step = true;
+                    min_step = min_step.min(cost);
+                    max_step = max_step.max(cost);
+                }
+            }
+        }
+        if has_step {
             assert!(
-                worst <= ceiling,
-                "a step costs {worst}, but on a board of {} cells no step may cost more than \
+                max_step <= ceiling,
+                "a step costs {max_step}, but on a board of {} cells no step may cost more than \
                  {ceiling} or a path's total could overflow Cost ({}). Scale your costs down.",
                 g.len(),
                 Cost::MAX,
@@ -152,7 +155,7 @@ impl<F> Movement<F> {
 
         Self {
             enter,
-            min_step: costs.into_iter().min().unwrap_or(0),
+            min_step: if has_step { min_step } else { 0 },
         }
     }
 
@@ -228,10 +231,7 @@ impl Movement<()> {
             Cost::MAX,
         );
 
-        Movement {
-            enter: move |_| Some(cost),
-            min_step: cost,
-        }
+        Movement::new(move |_| Some(cost), cost)
     }
 }
 
