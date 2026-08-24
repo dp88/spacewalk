@@ -15,6 +15,8 @@ use crate::coord::{Coord, Idx, Metric, Tag};
 use crate::full::FullGrid;
 use crate::path::{Cost, Movement, Path, Step};
 use crate::sub::SubGrid;
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// The largest sight radius [`Grid::visible_from`] will attempt: 64.
 ///
@@ -369,7 +371,7 @@ pub trait Grid {
         // so this changes no correct answer — but a `Coord` whose `step` wraps (a torus world is a
         // perfectly ordinary thing to want) makes the step table cyclic, and an unbounded walk down
         // it never returns. `.collect()` on that fills memory until the machine dies.
-        std::iter::successors(self.step(i, d), move |&j| self.step(j, d)).take(self.len())
+        core::iter::successors(self.step(i, d), move |&j| self.step(j, d)).take(self.len())
     }
 
     /// The unbroken line of cells through `i` along the `d` axis, in board order.
@@ -428,7 +430,7 @@ pub trait Grid {
 
         // Bounded by the board on both legs, for the reason `ray` is: a wrapping `Coord::step`
         // makes the step table cyclic, and an unbounded walk down it never returns.
-        let mut line: Vec<Idx> = std::iter::successors(behind(i), |&j| behind(j))
+        let mut line: Vec<Idx> = core::iter::successors(behind(i), |&j| behind(j))
             .take(self.len())
             .take_while(|&j| same(j))
             .collect();
@@ -869,6 +871,8 @@ mod tests {
     use crate::coord::{Dir8, Hex, Metric, Sq};
     use crate::full::{Adjacency, FullGrid};
     use crate::grid::Grid;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn a_ray_stops_at_the_edge() {

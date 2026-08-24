@@ -9,12 +9,14 @@
 //! keeps the grid immutable, shareable, and out of your borrow checker's way: `&FullGrid` and
 //! `&mut your_state` are simply different objects.
 
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
+use hashbrown::HashMap;
+use hashbrown::hash_map::Entry;
 
 use crate::coord::{Coord, Dir6, Dir8, Hex, Idx, Metric, Sq, Tag};
 use crate::grid::{Grid, same_grid, slot};
 use crate::layout::Offset;
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// The step table's empty slot. `u32::MAX` cells will never exist.
 ///
@@ -88,6 +90,12 @@ pub struct FullGrid<C: Coord> {
     /// Every cell's coordinate, in index order: `cells[i]` is the coordinate of cell `i`.
     cells: Vec<C>,
     /// The reverse lookup: coordinate to index. `index_of` is one probe of this map.
+    ///
+    /// `hashbrown`, which is what `std`'s own `HashMap` is built from, so this is the same table
+    /// without the `std`. An `alloc::BTreeMap` would have kept the crate free of dependencies
+    /// altogether, and it was measured: five times slower per lookup, six times slower to build a
+    /// board, and 2.8x slower on `visible_from`, which asks this question once per cell it draws a
+    /// line to.
     index: HashMap<C, u32>,
     /// The direction alphabet, fixing the column order of `steps`.
     dirs: Vec<C::Dir>,
@@ -526,6 +534,7 @@ impl FullGrid<Hex> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn a_rectangle_has_width_times_height_cells() {

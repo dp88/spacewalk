@@ -8,11 +8,13 @@
 //! with an exotic board implements the trait itself; see `tests/chess3d.rs`, which builds a
 //! three-layer chess board in a few dozen lines without touching this crate.
 
-use std::cmp::Ordering;
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::ops::{Add, Sub};
+use crate::float;
+use core::cmp::Ordering;
+use core::fmt;
+use core::hash::{Hash, Hasher};
+use core::ops::{Add, Sub};
 
+use alloc::vec::Vec;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -222,7 +224,7 @@ const LATTICE_LIMIT: i32 = (1 << 30) - 1;
 /// Round one axis of a lerp, clamped so an absurd coordinate cannot wrap on the way back to `i32`.
 fn lerp_axis(a: i32, b: i32, t: f64) -> i32 {
     let (a, b) = (f64::from(a), f64::from(b));
-    clamp_i32((a + (b - a) * t).round())
+    clamp_i32(float::round(a + (b - a) * t))
 }
 
 /// `f64`, never `f32`. An `f32` has a 24-bit mantissa, so it cannot represent integers above
@@ -248,7 +250,7 @@ fn sq_lerp(a: Sq, b: Sq, t: u32, n: u32) -> Sq {
 pub(crate) fn hex_round(q: f64, r: f64) -> Hex {
     let s = -q - r;
 
-    let (mut rq, mut rr, rs) = (q.round(), r.round(), s.round());
+    let (mut rq, mut rr, rs) = (float::round(q), float::round(r), float::round(s));
     let (dq, dr, ds) = ((rq - q).abs(), (rr - r).abs(), (rs - s).abs());
     if dq > dr && dq > ds {
         rq = -rr - rs;
@@ -352,6 +354,28 @@ impl Metric<Hex> {
     .with_lerp(hex_lerp);
 }
 
+/// FNV-1a, because `core` has no hasher and this needs no more than one.
+///
+/// A [`Tag`] is compared only against other tags made in the same process, in a debug build, to
+/// catch a mistake. It does not have to resist an adversary or survive a restart — it has to be
+/// cheap, deterministic, and mix well enough that two different boards rarely collide.
+#[cfg(debug_assertions)]
+struct Fnv(u64);
+
+#[cfg(debug_assertions)]
+impl Hasher for Fnv {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 ^= u64::from(b);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
 /// Which board's numbering an [`Idx`] belongs to.
 ///
 /// A tag names a *numbering*, not an object. Two boards that number the same cells in the same
@@ -378,9 +402,7 @@ impl Tag {
     /// pays nothing for them in a shipped build.
     #[cfg(debug_assertions)]
     pub fn of<H: Hash>(items: impl IntoIterator<Item = H>) -> Self {
-        use std::hash::{DefaultHasher, Hasher};
-
-        let mut h = DefaultHasher::new();
+        let mut h = Fnv(0xcbf2_9ce4_8422_2325);
         let mut n: u64 = 0;
         for item in items {
             item.hash(&mut h);
@@ -821,8 +843,18 @@ macro_rules! vector_ops {
             fn sub(self, o: Self) -> Self { Self { $($f: self.$f.saturating_sub(o.$f)),+ } }
         }
         impl fmt::Display for $t {
+            // Straight to the formatter. The obvious version collects the fields into `String`s
+            // and joins them, which is two allocations to print two integers.
+            #[allow(unused_assignments)]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "({})", [$(self.$f.to_string()),+].join(", "))
+                let mut sep = "";
+                f.write_str("(")?;
+                $(
+                    f.write_str(sep)?;
+                    sep = ", ";
+                    write!(f, "{}", self.$f)?;
+                )+
+                f.write_str(")")
             }
         }
     };

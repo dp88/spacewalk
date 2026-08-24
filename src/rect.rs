@@ -171,6 +171,7 @@ mod tests {
     use super::*;
     use crate::full::FullGrid;
     use crate::path::{Cost, Movement};
+    use alloc::vec::Vec;
 
     /// Every predecessor of `j`, as a set — the two boards agree on the members, and the trait
     /// promises no order.

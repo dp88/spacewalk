@@ -37,6 +37,21 @@ jobs:
       - run: cargo test --release --all-features --all-targets
       - run: cargo test --release --all-features --doc
 
+  # The crate is `#![no_std]`. Nothing in it wants an operating system, and this is what keeps that
+  # true — a host build would not notice `std` creeping back in through a dependency's default
+  # features, which is exactly how it would happen.
+  bare_metal:
+    name: Bare metal
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --target thumbv7em-none-eabihf
+      - run: cargo build --target thumbv7em-none-eabihf --features serde
+
   lint:
     name: Format and lint
     runs-on: ubuntu-latest

@@ -17,11 +17,13 @@
 //! cell is only enqueued when a step into it improves on the best cost so far, and there are
 //! `cells × directions` steps in total. A budget, a radius, or a cost cannot make any of it bigger.
 
-use std::collections::BinaryHeap;
+use alloc::collections::BinaryHeap;
 
 use crate::coord::{Idx, Tag};
 use crate::grid::{Grid, slot};
 use crate::path::{Cost, Movement, Path, Step};
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// A running total, which **saturates instead of wrapping**.
 ///
@@ -133,13 +135,13 @@ struct Visit {
 }
 
 impl Ord for Visit {
-    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, o: &Self) -> core::cmp::Ordering {
         o.est.cmp(&self.est).then_with(|| o.at.cmp(&self.at))
     }
 }
 
 impl PartialOrd for Visit {
-    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, o: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(o))
     }
 }

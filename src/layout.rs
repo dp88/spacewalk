@@ -35,12 +35,11 @@
 //! [`MAX_CELLS`](crate::MAX_CELLS), so no legal board reaches a pixel coordinate an `f32` cannot
 //! hold exactly — but a stray click can, and `f64` keeps that honest.
 
-use std::f64::consts::PI;
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::coord::{clamp_i32, hex_round};
+use crate::float;
 use crate::{Hex, Sq};
 
 /// `√3`, which is the whole of hex trigonometry.
@@ -224,14 +223,12 @@ impl HexLayout {
     pub fn corners(&self, h: Hex) -> [Pt; 6] {
         let c = self.center(h);
         // Pointy has a vertex at 12 o'clock, flat has one at 3 o'clock: the same ring, 30° apart.
-        let first = match self.orientation {
-            Orientation::Pointy => PI / 6.0,
-            Orientation::Flat => 0.0,
+        // Six fixed angles per orientation, so twelve numbers rather than twelve calls to `cos`.
+        let ring = match self.orientation {
+            Orientation::Pointy => &float::POINTY_CORNERS,
+            Orientation::Flat => &float::FLAT_CORNERS,
         };
-        std::array::from_fn(|i| {
-            let a = (i as f64).mul_add(PI / 3.0, first);
-            place(self.size, a.cos(), a.sin(), c)
-        })
+        core::array::from_fn(|i| place(self.size, ring[i].0, ring[i].1, c))
     }
 }
 
@@ -295,7 +292,7 @@ impl SqLayout {
         let (u, v) = local("SqLayout", self.size, self.origin, p);
         // Floor, not truncate: truncation folds -0.5 and +0.5 onto the same cell, putting a seam
         // down the middle of the board that only shows up in the negative quadrant.
-        Sq::new(clamp_i32(u.floor()), clamp_i32(v.floor()))
+        Sq::new(clamp_i32(float::floor(u)), clamp_i32(float::floor(v)))
     }
 
     /// The four corners, clockwise from the top-left.
@@ -404,9 +401,13 @@ fn shear(line: i64, even: bool) -> i64 {
 /// final answer. Both `center`s and the hex `corners` project through here; the square corners
 /// are plain `f32` offsets from an already-projected centre.
 fn place(size: Pt, u: f64, v: f64, at: Pt) -> Pt {
+    // `mul_add` would be one rounding rather than two, but it is not in `core` and it is a fused
+    // instruction this crate has no need of: the difference is one ulp, against a lattice whose
+    // cells are pixels wide.
+    #[allow(clippy::cast_possible_truncation)]
     Pt::new(
-        f64::from(size.x).mul_add(u, f64::from(at.x)) as f32,
-        f64::from(size.y).mul_add(v, f64::from(at.y)) as f32,
+        (f64::from(size.x) * u + f64::from(at.x)) as f32,
+        (f64::from(size.y) * v + f64::from(at.y)) as f32,
     )
 }
 

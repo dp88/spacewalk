@@ -12,6 +12,7 @@
 
 use crate::coord::{Idx, Metric, Tag};
 use crate::grid::{Dir, Grid, same_grid, slot};
+use alloc::vec::Vec;
 
 /// Some of a board's cells, as a board of their own.
 ///
@@ -93,7 +94,7 @@ impl<'a, B: Grid> SubGrid<'a, B> {
         // The root's tag is mixed in so that two regions holding the same local index list, taken
         // from different boards, do not collide.
         let tag = Tag::of(
-            std::iter::once(u64::from(u32::MAX) + 1).chain(cells.iter().map(|&i| u64::from(i))),
+            core::iter::once(u64::from(u32::MAX) + 1).chain(cells.iter().map(|&i| u64::from(i))),
         );
         Self { root, cells, tag }
     }
@@ -197,6 +198,7 @@ mod tests {
     use crate::full::{Adjacency, FullGrid};
     use crate::grid::Grid;
     use crate::path::{Cost, Movement, Step};
+    use alloc::vec::Vec;
 
     /// The 3x3 block in the corner of an 8x8 board, and the board it came from.
     fn corner() -> (FullGrid<Sq>, Vec<Idx>) {

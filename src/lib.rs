@@ -169,23 +169,38 @@
 //!   holds function pointers. `tests/save.rs` shows what to persist instead — coordinates, never
 //!   indices, and a `CellMap` only alongside the cells that fix its order.
 //!
-//! # No dependencies
+//! # It does not need `std`
 //!
-//! `cargo tree` is one line. The `serde` feature above is optional and off by default; nothing else
-//! is pulled in at all, and the searches behind [`Grid::path`] and [`Grid::reachable`] are the
-//! crate's own.
+//! The crate is `#![no_std]`, unconditionally, and builds for a bare-metal target. Nothing in it
+//! wants an operating system — no files, no threads, no clock — so `alloc` is the whole of what it
+//! asks for, and that is present wherever `std` is. There is no feature to turn on and nothing an
+//! ordinary user does differently.
 //!
-//! That is not austerity for its own sake. A general graph library must key its bookkeeping on
-//! whatever a node happens to be, so it reaches for a hash map — and a board's cells are already
-//! numbered `0..len`, which turns that map into two vectors read by subscript. Dropping the
-//! library made the crate smaller *and* faster.
+//! Two things follow that are worth knowing. `core` has no `f64::round`, `floor`, `cos`, or `sin`,
+//! so [`layout`] carries its own — the hexagon corner angles were always twelve fixed numbers, and
+//! the rounding is integer arithmetic once a value is known to be finite. Each one is checked
+//! against `std`'s over a few million values, because hand-written floating point deserves the
+//! suspicion.
+//!
+//! And the dependency list is one crate: `hashbrown`, which is the table `std`'s own `HashMap` is
+//! built from. The searches behind [`Grid::path`] and [`Grid::reachable`] are the crate's own — a
+//! general graph library must key its bookkeeping on whatever a node happens to be, and a board's
+//! cells are already numbered `0..len`, which turns that map into two vectors read by subscript.
 //!
 //! # Where to start
 //!
 //! [`prelude`] imports the names above in one line. [`Grid`] is where the vocabulary lives, and its
 //! own documentation says which questions hand back an iterator, which a board, and which a `Vec`.
 
+#![no_std]
 #![deny(missing_docs)]
+
+extern crate alloc;
+
+// Unit tests inside the crate use `std` freely — that is how the hand-written floating point in
+// `float` is checked against the real thing, and how `cells` catches a panic.
+#[cfg(test)]
+extern crate std;
 
 /// The README is compiled as part of the test suite, so its examples cannot rot.
 #[cfg(doctest)]
@@ -194,6 +209,9 @@ struct ReadmeDoctests;
 
 pub mod cells;
 pub mod coord;
+/// Floating point `core` does not carry. Private: it is an implementation detail of
+/// [`layout`] and [`coord`].
+mod float;
 pub mod full;
 pub mod grid;
 pub mod layout;

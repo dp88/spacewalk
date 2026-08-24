@@ -19,13 +19,15 @@
 //! started with: an AI search reads the board while it mutates the position, and cloning a position
 //! never copies the board.
 
-use std::ops::{Index, IndexMut};
+use core::ops::{Index, IndexMut};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::coord::{Idx, Tag};
 use crate::grid::Grid;
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// One `T` for every cell of a grid, addressed by [`Idx`].
 ///

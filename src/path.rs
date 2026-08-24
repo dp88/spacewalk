@@ -43,10 +43,11 @@
 //! assert_eq!(g.path(end, start, &walk).unwrap().cost(), 40);
 //! ```
 
-use std::fmt;
+use core::fmt;
 
 use crate::coord::{Coord, Idx};
 use crate::grid::{Grid, cost_ceiling};
+use alloc::vec::Vec;
 
 /// What a step costs.
 ///
@@ -311,6 +312,7 @@ mod tests {
     use super::*;
     use crate::coord::{Dir8, Sq};
     use crate::full::{Adjacency, FullGrid};
+    use alloc::vec;
 
     /// Open ground: every step costs 10.
     fn open(g: &FullGrid<Sq>) -> Movement<impl Fn(Step<Sq>) -> Option<Cost>> {
