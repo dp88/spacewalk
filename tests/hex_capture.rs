@@ -31,7 +31,7 @@ fn moves(g: &FullGrid<Hex>, from: Idx) -> (SubGrid<'_, FullGrid<Hex>>, SubGrid<'
 #[test]
 fn a_piece_in_open_ground_has_six_clones_and_twelve_jumps() {
     let g = FullGrid::hexagon(4);
-    let mid = g.index_of(Hex::new(0, 0)).unwrap();
+    let mid = g.at(Hex::new(0, 0));
     let (clones, jumps) = moves(&g, mid);
 
     assert_eq!(clones.len(), 6, "the six neighbours");
@@ -42,8 +42,8 @@ fn a_piece_in_open_ground_has_six_clones_and_twelve_jumps() {
 fn a_jump_leaps_clean_over_a_hole() {
     let g = board();
     // (1,0) sits beside the hole at (0,0), and (-1,0) is directly opposite across it.
-    let from = g.index_of(Hex::new(1, 0)).unwrap();
-    let across = g.index_of(Hex::new(-1, 0)).unwrap();
+    let from = g.at(Hex::new(1, 0));
+    let across = g.at(Hex::new(-1, 0));
 
     assert_eq!(g.distance(from, across), 2);
 
@@ -60,7 +60,7 @@ fn a_jump_leaps_clean_over_a_hole() {
 #[test]
 fn a_hole_is_never_a_move_target() {
     let g = board();
-    let from = g.index_of(Hex::new(1, 0)).unwrap();
+    let from = g.at(Hex::new(1, 0));
     let (clones, jumps) = moves(&g, from);
 
     // The hole at (0,0) is adjacent, but it is not a cell, so it cannot be landed on.
@@ -92,18 +92,18 @@ fn landing_flips_every_adjacent_enemy() {
     let g = board();
     let mut owner = vec![EMPTY; g.len()];
 
-    let landing = g.index_of(Hex::new(1, 0)).unwrap();
+    let landing = g.at(Hex::new(1, 0));
     for (_, n) in g.neighbors(landing) {
-        owner[n as usize] = 1; // ring it with enemies
+        owner[n.get() as usize] = 1; // ring it with enemies
     }
     let enemies = g.neighbors(landing).count();
     assert!(enemies > 0);
 
     // Land, and flip.
-    owner[landing as usize] = 0;
+    owner[landing.get() as usize] = 0;
     for (_, n) in g.neighbors(landing) {
-        if owner[n as usize] == 1 {
-            owner[n as usize] = 0;
+        if owner[n.get() as usize] == 1 {
+            owner[n.get() as usize] = 0;
         }
     }
 
@@ -124,7 +124,7 @@ fn the_board_is_shared_not_copied_when_the_ai_searches() {
     let explore = |mut p: Vec<i8>| {
         for i in g.indices() {
             if let Some((_, n)) = g.neighbors(i).next() {
-                p[n as usize] = 0; // read the board, write the position
+                p[n.get() as usize] = 0; // read the board, write the position
             }
         }
         p

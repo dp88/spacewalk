@@ -13,7 +13,7 @@
 
 use std::ops::{Add, Sub};
 
-use spacewalk::{Adjacency, Coord, Dir8, FullGrid, Grid, Hex, Metric, Movement, Path, Sq, Step};
+use spacewalk::{Adjacency, Coord, Dir8, FullGrid, Grid, Hex, Metric, Movement, Sq, Step};
 
 mod common;
 
@@ -47,15 +47,15 @@ fn a_total_that_would_overflow_saturates_instead_of_hanging() {
     let g = FullGrid::square(10, 1, Adjacency::Four);
     let m = Movement::new(|_: Step<Sq>| Some(600_000_000), 0);
 
-    let a = g.index_of(Sq::new(0, 0)).unwrap();
-    let b = g.index_of(Sq::new(9, 0)).unwrap();
+    let a = g.at(Sq::new(0, 0));
+    let b = g.at(Sq::new(9, 0));
 
     let p = g
         .path(a, b, &m)
         .expect("it must terminate, and it must find the corridor");
     assert_eq!(p.len(), 9);
     assert_eq!(
-        p.cost,
+        p.cost(),
         u32::MAX,
         "the total pegs at the ceiling rather than wrapping to a lie"
     );
@@ -74,8 +74,8 @@ fn a_colossal_min_step_cannot_overflow_the_heuristic() {
     let g = FullGrid::square(8, 8, Adjacency::Four);
     let m = Movement::new(|_: Step<Sq>| Some(10), u32::MAX);
 
-    let a = g.index_of(Sq::new(0, 0)).unwrap();
-    let b = g.index_of(Sq::new(7, 7)).unwrap();
+    let a = g.at(Sq::new(0, 0));
+    let b = g.at(Sq::new(7, 7));
 
     // Ok  => release: it saturates, terminates, and finds a path.
     // Err => debug: the debug_assert caught the lying min_step first. Also an acceptable answer.
@@ -92,8 +92,8 @@ fn a_colossal_min_step_cannot_overflow_the_heuristic() {
 fn reach_and_path_toward_survive_the_same_costs() {
     let g = FullGrid::square(12, 1, Adjacency::Four);
     let m = Movement::new(|_: Step<Sq>| Some(900_000_000), 0);
-    let a = g.index_of(Sq::new(0, 0)).unwrap();
-    let z = g.index_of(Sq::new(11, 0)).unwrap();
+    let a = g.at(Sq::new(0, 0));
+    let z = g.at(Sq::new(11, 0));
 
     assert!(!g.reachable(a, u32::MAX, &m).is_empty());
     assert!(g.path_toward(a, z, u32::MAX, &m).is_some());
@@ -129,8 +129,8 @@ fn a_grid_of_extreme_coordinates_can_be_built_and_measured() {
         Metric::MANHATTAN,
     );
 
-    let hi = g.index_of(Sq::new(i32::MAX, 0)).unwrap();
-    let lo = g.index_of(Sq::new(i32::MIN, 0)).unwrap();
+    let hi = g.at(Sq::new(i32::MAX, 0));
+    let lo = g.at(Sq::new(i32::MIN, 0));
 
     assert!(g.distance(hi, lo) > 1, "they are not neighbours");
     assert_eq!(
@@ -188,7 +188,7 @@ fn a_ray_on_a_wrapping_world_terminates() {
         Metric::scanning(|a: Ring, b: Ring| (b - a).0.unsigned_abs()),
     );
 
-    let start = g.index_of(Ring(0)).unwrap();
+    let start = g.at(Ring(0));
     let walked: Vec<_> = g.ray(start, Spin::Round).collect();
 
     assert_eq!(walked.len(), g.len(), "bounded by the board, and no longer");
@@ -208,7 +208,7 @@ fn a_clamping_step_does_not_become_a_self_loop() {
         Metric::scanning(|a: Clamp, b: Clamp| (b.0 - a.0).unsigned_abs()),
     );
 
-    let last = g.index_of(Clamp(4)).unwrap();
+    let last = g.at(Clamp(4));
     assert_eq!(
         g.step(last, Spin::Round),
         None,
@@ -253,18 +253,34 @@ fn an_empty_grid_is_harmless() {
     assert_eq!(g.indices().count(), 0);
     assert_eq!(g.index_of(Sq::new(0, 0)), None);
 
-    // No index is valid on it, so every index-taking call must say so rather than fault.
-    assert!(std::panic::catch_unwind(|| g.coord(0)).is_err());
+    // No index is valid on it, so every index-taking call must say so rather than fault. The only
+    // way to get an index at all is from another board, which is the point.
+    let other = FullGrid::square(1, 1, Adjacency::Four);
+    let stale = other.at(Sq::new(0, 0));
+    assert!(std::panic::catch_unwind(|| g.coord(stale)).is_err());
 }
 
 #[test]
 fn a_foreign_index_says_so() {
+    // 999 is a real cell of `big` and no cell at all of `g`. There is no other way to get one:
+    // only a board mints an index, so a bare number cannot be passed off as one.
     let g = FullGrid::square(3, 3, Adjacency::Four);
-    let boom = std::panic::catch_unwind(|| g.coord(999));
+    let big = FullGrid::square(40, 40, Adjacency::Four);
+    let far = big.at(Sq::new(39, 24)); // 39 + 24 * 40
+    assert_eq!(far.get(), 999);
+
+    let boom = std::panic::catch_unwind(|| g.coord(far));
     let msg = *boom.unwrap_err().downcast::<String>().unwrap();
 
     assert!(msg.contains("999"), "names the index: {msg}");
-    assert!(msg.contains("9 cells"), "and the board it is not on: {msg}");
+    if cfg!(debug_assertions) {
+        assert!(
+            msg.contains("different grid"),
+            "and that it is foreign: {msg}"
+        );
+    } else {
+        assert!(msg.contains("9 cells"), "and the board it is not on: {msg}");
+    }
 }
 
 #[test]
@@ -304,22 +320,26 @@ fn a_board_with_genuine_multi_cell_steps_may_opt_out_with_a_zero_metric() {
     let g = FullGrid::new((0..9).map(Leap), Leap::DIRS, Metric::scanning(|_, _| 0));
     let m = Movement::scan(&g, |_| Some(10));
 
-    let start = g.index_of(Leap(0)).unwrap();
-    let far = g.index_of(Leap(6)).unwrap();
+    let start = g.at(Leap(0));
+    let far = g.at(Leap(6));
     assert_eq!(g.path(start, far, &m).unwrap().len(), 2, "two portal hops");
 }
 
 #[test]
-fn an_empty_path_does_not_claim_to_be_eighteen_quintillion_long() {
-    // `Path`'s fields are public, so a caller can build this. `steps.len() - 1` on an empty vector
-    // wraps to usize::MAX in release, and `is_empty()` returned FALSE — so a caller who correctly
-    // guarded with `is_empty()` then looped `0..p.len()` 18 quintillion times.
-    let p = Path {
-        steps: vec![],
-        cost: 0,
-    };
+fn a_path_that_goes_nowhere_is_length_zero_not_eighteen_quintillion() {
+    // This used to be constructible: `Path`'s fields were public, `steps.len() - 1` on an empty
+    // vector wrapped to usize::MAX in release, and `is_empty()` answered FALSE — so a caller who
+    // correctly guarded with `is_empty()` then looped `0..p.len()` 18 quintillion times.
+    //
+    // The fields are private now and only a search builds a `Path`, so the empty one cannot be
+    // written down at all. What is left is the shortest real path: one cell, going nowhere.
+    let g = FullGrid::square(3, 3, Adjacency::Four);
+    let here = g.at(Sq::new(1, 1));
+    let p = g.path(here, here, &Movement::uniform(&g, 10)).unwrap();
 
     assert_eq!(p.len(), 0);
     assert!(p.is_empty());
-    assert_eq!(p.destination(), None);
+    assert_eq!(p.destination(), here);
+    assert_eq!(p.start(), here, "it never left");
+    assert_eq!(p.cost(), 0, "standing still is free");
 }

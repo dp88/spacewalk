@@ -10,8 +10,8 @@
 //! [`component`](Grid::component) and [`visible_from`](Grid::visible_from) can hand one back
 //! without building anything.
 
-use crate::coord::{Idx, Metric};
-use crate::grid::{Dir, Grid, assert_cell};
+use crate::coord::{Idx, Metric, Tag};
+use crate::grid::{Dir, Grid, same_grid, slot};
 
 /// Some of a board's cells, as a board of their own.
 ///
@@ -42,7 +42,7 @@ use crate::grid::{Dir, Grid, assert_cell};
 /// let mud = CellMap::from_fn(&g, |c: Sq| c.y > 5);          // keyed by the root
 ///
 /// let north = g.subset(g.indices().filter(|&i| g.coord(i).y < 4));
-/// let here = north.index_of(Sq::new(0, 0)).unwrap();
+/// let here = north.at(Sq::new(0, 0));
 ///
 /// assert!(!mud[north.to_root(here)], "read the root's data through the bridge");
 /// ```
@@ -61,7 +61,14 @@ pub struct SubGrid<'a, B: Grid> {
     root: &'a B,
     /// The root's index for each of this board's cells, strictly ascending. One `Vec` serves both
     /// directions: `to_root` indexes it, `of_root` searches it.
-    cells: Vec<Idx>,
+    ///
+    /// Bare `u32`, not [`Idx`]: every entry is the root's by construction, and the root's tag is
+    /// held once in `tag` rather than once per cell.
+    cells: Vec<u32>,
+    /// This board's own numbering, hashed from the root's tag and the cell list above. A region
+    /// numbers from zero, so its indices and the root's are mutually wrong — this is what makes
+    /// mixing them a panic in a debug build rather than a wrong cell.
+    tag: Tag,
 }
 
 impl<'a, B: Grid> SubGrid<'a, B> {
@@ -72,10 +79,48 @@ impl<'a, B: Grid> SubGrid<'a, B> {
     /// so this picks the root's order and the `cells` table is ascending by construction rather
     /// than by an assertion the caller can trip.
     pub(crate) fn of(root: &'a B, cells: impl IntoIterator<Item = Idx>) -> Self {
-        let mut cells: Vec<Idx> = cells.into_iter().collect();
+        let root_tag = root.tag();
+        let mut cells: Vec<u32> = cells
+            .into_iter()
+            .map(|i| {
+                same_grid(root_tag, i);
+                i.raw()
+            })
+            .collect();
         cells.sort_unstable();
         cells.dedup();
-        Self { root, cells }
+
+        // The root's tag is mixed in so that two regions holding the same local index list, taken
+        // from different boards, do not collide.
+        let tag = Tag::of(
+            std::iter::once(u64::from(u32::MAX) + 1).chain(cells.iter().map(|&i| u64::from(i))),
+        );
+        Self { root, cells, tag }
+    }
+
+    /// This region's cells, numbered as the [`root`](Grid::root) numbers them.
+    ///
+    /// A `SubGrid` borrows, so it cannot be kept in a struct beside the board it came from. Keep
+    /// *this* instead — it is what [`Grid::subset`] takes — and rebuild the region when you next
+    /// need to ask it something.
+    ///
+    /// ```
+    /// use spacewalk::{Adjacency, FullGrid, Grid, Idx, Sq};
+    ///
+    /// let g = FullGrid::square(8, 8, Adjacency::Four);
+    /// let highlight: Vec<Idx> = g.within(g.at(Sq::new(2, 2)), 0, 2).root_indices().collect();
+    ///
+    /// // Later, and as often as you like:
+    /// assert!(g.subset(highlight.iter().copied()).contains(Sq::new(2, 4)));
+    /// ```
+    pub fn root_indices(&self) -> impl Iterator<Item = Idx> + '_ {
+        let tag = self.root.tag();
+        self.cells.iter().map(move |&i| Idx::new(tag, i))
+    }
+
+    /// Mint one of the root's indices from a slot in `cells`.
+    fn of_cells(&self, at: usize) -> Idx {
+        Idx::new(self.root.tag(), self.cells[at])
     }
 }
 
@@ -83,13 +128,17 @@ impl<B: Grid> Grid for SubGrid<'_, B> {
     type Cell = B::Cell;
     type Root = B;
 
+    fn tag(&self) -> Tag {
+        self.tag
+    }
+
     fn len(&self) -> usize {
         self.cells.len()
     }
 
     fn coord(&self, i: Idx) -> B::Cell {
-        assert_cell(self.len(), i);
-        self.root.coord(self.cells[i as usize])
+        let at = slot(self.len(), self.tag, i);
+        self.root.coord(self.of_cells(at))
     }
 
     fn index_of(&self, c: B::Cell) -> Option<Idx> {
@@ -101,21 +150,21 @@ impl<B: Grid> Grid for SubGrid<'_, B> {
     }
 
     fn step(&self, i: Idx, d: Dir<Self>) -> Option<Idx> {
-        assert_cell(self.len(), i);
-        self.of_root(self.root.step(self.cells[i as usize], d)?)
+        let at = slot(self.len(), self.tag, i);
+        self.of_root(self.root.step(self.of_cells(at), d)?)
     }
 
     fn neighbors(&self, i: Idx) -> impl Iterator<Item = (Dir<Self>, Idx)> {
-        assert_cell(self.len(), i);
+        let at = slot(self.len(), self.tag, i);
         self.root
-            .neighbors(self.cells[i as usize])
+            .neighbors(self.of_cells(at))
             .filter_map(move |(d, j)| Some((d, self.of_root(j)?)))
     }
 
     fn in_neighbors(&self, j: Idx) -> impl Iterator<Item = (Dir<Self>, Idx)> {
-        assert_cell(self.len(), j);
+        let at = slot(self.len(), self.tag, j);
         self.root
-            .in_neighbors(self.cells[j as usize])
+            .in_neighbors(self.of_cells(at))
             .filter_map(move |(d, i)| Some((d, self.of_root(i)?)))
     }
 
@@ -128,12 +177,17 @@ impl<B: Grid> Grid for SubGrid<'_, B> {
     }
 
     fn to_root(&self, i: Idx) -> Idx {
-        assert_cell(self.len(), i);
-        self.cells[i as usize]
+        let at = slot(self.len(), self.tag, i);
+        self.of_cells(at)
     }
 
     fn of_root(&self, i: Idx) -> Option<Idx> {
-        self.cells.binary_search(&i).ok().map(|k| k as Idx)
+        same_grid(self.root.tag(), i);
+        #[allow(clippy::cast_possible_truncation)]
+        self.cells
+            .binary_search(&i.raw())
+            .ok()
+            .map(|k| Idx::new(self.tag, k as u32))
     }
 }
 
@@ -160,7 +214,9 @@ mod tests {
             b.len(),
             b.cells().collect(),
             b.indices().map(|i| b.neighbors(i).count()).collect(),
-            b.indices().map(|i| b.distance(0, i)).collect(),
+            b.indices()
+                .map(|i| b.distance(b.at(Sq::new(0, 0)), i))
+                .collect(),
             b.is_connected(|_| true),
         )
     }
@@ -173,10 +229,19 @@ mod tests {
         let all = g.subset(g.indices());
 
         assert_eq!(survey(&g), survey(&all));
+
+        // Each board is asked in its own indices — which is the point. They agree because the
+        // subset covers every cell in the same order, not because an index was reused.
+        let (from, to) = (Sq::new(0, 0), Sq::new(4, 3));
         assert_eq!(
-            g.path(0, 19, &Movement::scan(&g, |_| Some(10))).unwrap(),
-            all.path(0, 19, &Movement::scan(&all, |_| Some(10)))
+            g.path(g.at(from), g.at(to), &Movement::scan(&g, |_| Some(10)))
                 .unwrap(),
+            all.path(
+                all.at(from),
+                all.at(to),
+                &Movement::scan(&all, |_| Some(10))
+            )
+            .unwrap(),
         );
     }
 
@@ -191,7 +256,7 @@ mod tests {
             assert_eq!(sub.coord(i), g.coord(sub.to_root(i)));
         }
 
-        let outside = g.index_of(Sq::new(7, 7)).unwrap();
+        let outside = g.at(Sq::new(7, 7));
         assert_eq!(sub.of_root(outside), None, "not every root cell is in here");
     }
 
@@ -218,7 +283,7 @@ mod tests {
     fn a_step_that_leaves_a_subgrid_is_the_edge_of_the_board() {
         let (g, block) = corner();
         let sub = g.subset(block);
-        let rim = sub.index_of(Sq::new(2, 1)).unwrap();
+        let rim = sub.at(Sq::new(2, 1));
 
         assert!(sub.step(rim, Dir8::E).is_none(), "east is off this board");
         assert!(sub.step(rim, Dir8::W).is_some());
@@ -226,7 +291,7 @@ mod tests {
         // And a search cannot escape it either: the far corner of the root is simply not here.
         let m: Movement<fn(Step<Sq>) -> Option<Cost>> = Movement::new(|_| Some(10), 10);
         let ends: Vec<Sq> = sub
-            .reachable(sub.index_of(Sq::new(0, 0)).unwrap(), 1000, &m)
+            .reachable(sub.at(Sq::new(0, 0)), 1000, &m)
             .iter()
             .map(|&(i, _)| sub.coord(i))
             .collect();
@@ -239,14 +304,11 @@ mod tests {
         // A region is a smaller board, not a shorter ruler. The metric measures coordinates, so
         // dropping cells between two others must not bring them closer.
         let g = FullGrid::square(8, 8, Adjacency::Eight);
-        let ends = g.subset([
-            g.index_of(Sq::new(0, 0)).unwrap(),
-            g.index_of(Sq::new(5, 0)).unwrap(),
-        ]);
+        let ends = g.subset([g.at(Sq::new(0, 0)), g.at(Sq::new(5, 0))]);
 
         assert_eq!(ends.len(), 2);
         assert_eq!(
-            ends.distance(0, 1),
+            ends.distance(ends.at(Sq::new(0, 0)), ends.at(Sq::new(5, 0))),
             5,
             "and not 1, which is how far apart they are numbered"
         );

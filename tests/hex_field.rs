@@ -167,7 +167,7 @@ fn the_only_route_south_goes_through_the_door() {
 
     let through = route(true).expect("the door is open");
     assert!(
-        through.steps.contains(&at(&g, 5, 3)),
+        through.steps().contains(&at(&g, 5, 3)),
         "every route south uses the one door"
     );
 }
@@ -181,7 +181,7 @@ fn a_ford_is_walked_round_when_it_is_dearer_than_the_detour() {
 
     let crossing = g.path(at(&g, 4, 5), at(&g, 10, 5), &m).expect("a way east");
     assert!(
-        crossing.steps.iter().all(|&i| terrain[i] != Tile::Water),
+        crossing.steps().iter().all(|&i| terrain[i] != Tile::Water),
         "it went round the ford"
     );
 }

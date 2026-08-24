@@ -30,10 +30,7 @@ fn a_small_radius_costs_the_same_on_a_big_board_as_on_a_small_one() {
     // by two orders of magnitude, on any hardware.
     let big = FullGrid::square(200, 200, Adjacency::Eight); // 40,000 cells
     let small = FullGrid::square(20, 20, Adjacency::Eight); //     400 cells
-    let (bi, si) = (
-        big.index_of(Sq::new(100, 100)).unwrap(),
-        small.index_of(Sq::new(10, 10)).unwrap(),
-    );
+    let (bi, si) = (big.at(Sq::new(100, 100)), small.at(Sq::new(10, 10)));
 
     let time = |g: &FullGrid<Sq>, i| {
         for _ in 0..1_000 {
@@ -68,7 +65,7 @@ fn the_answer_is_the_same_whichever_way_it_is_computed() {
     // The offset walk and the board scan must agree exactly — including order, since callers may
     // compare the results. `Metric::scanning` forces the scan; the shipped metrics take the offsets.
     let fast = FullGrid::square(40, 40, Adjacency::Eight);
-    let i = fast.index_of(Sq::new(20, 20)).unwrap();
+    let i = fast.at(Sq::new(20, 20));
 
     for (min, max) in [(0, 0), (0, 1), (1, 1), (2, 3), (0, 5), (3, 3)] {
         let by_offsets: Vec<Sq> = fast.within(i, min, max).cells().collect();
@@ -95,7 +92,7 @@ fn a_preposterous_radius_does_not_try_to_allocate_the_universe() {
     //
     // If this test ever stops returning, that is the bug.
     let g = FullGrid::square(30, 30, Adjacency::Eight);
-    let centre = g.index_of(Sq::new(15, 15)).unwrap();
+    let centre = g.at(Sq::new(15, 15));
 
     let t = Instant::now();
     let all = g.within(centre, 0, u32::MAX);
@@ -117,7 +114,7 @@ fn the_crossover_is_invisible_from_outside() {
     // Small radius takes the offsets; large radius takes the scan. A caller should never be able to
     // tell which, except by timing it.
     let g = FullGrid::square(20, 20, Adjacency::Four);
-    let i = g.index_of(Sq::new(10, 10)).unwrap();
+    let i = g.at(Sq::new(10, 10));
 
     let small = g.within(i, 0, 3); // offsets: 25 of them
     let large = g.within(i, 0, 500); // scan: 500 is far bigger than the board
@@ -133,7 +130,7 @@ fn the_crossover_is_invisible_from_outside() {
 fn an_inverted_range_is_empty_rather_than_expensive() {
     // `min > max` used to build the whole radius-max disc and then filter every one of them away.
     let g = FullGrid::square(10, 10, Adjacency::Four);
-    let i = g.index_of(Sq::new(5, 5)).unwrap();
+    let i = g.at(Sq::new(5, 5));
 
     assert!(g.within(i, 5, 2).is_empty());
     assert!(g.within(i, 1, 0).is_empty());
@@ -144,9 +141,9 @@ fn hex_rings_still_jump_over_holes() {
     // The clone-and-jump game's whole move set, and the reason `within` measures COORDINATES rather
     // than walking the graph. It must survive the switch to an offset table.
     let g = FullGrid::hexagon(4).filtered(|c| c != Hex::new(1, 0));
-    let from = g.index_of(Hex::new(2, 0)).unwrap();
+    let from = g.at(Hex::new(2, 0));
 
-    let across = g.index_of(Hex::new(0, 0)).unwrap();
+    let across = g.at(Hex::new(0, 0));
     assert_eq!(g.distance(from, across), 2);
     assert!(
         g.ring(from, 2).contains(Hex::new(0, 0)),
@@ -158,12 +155,12 @@ fn hex_rings_still_jump_over_holes() {
 fn the_shapes_are_still_right() {
     // The offset table has to reproduce the metric exactly, or an archer's range changes shape.
     let four = FullGrid::square(11, 11, Adjacency::Four);
-    let i = four.index_of(Sq::new(5, 5)).unwrap();
+    let i = four.at(Sq::new(5, 5));
     assert_eq!(four.within(i, 1, 1).len(), 4, "a plus sign");
     assert_eq!(four.within(i, 1, 2).len(), 12, "a diamond");
 
     let eight = FullGrid::square(11, 11, Adjacency::Eight);
-    let j = eight.index_of(Sq::new(5, 5)).unwrap();
+    let j = eight.at(Sq::new(5, 5));
     assert_eq!(eight.within(j, 1, 1).len(), 8, "a ring");
     assert_eq!(
         eight.within(j, 1, 2).len(),
@@ -172,7 +169,7 @@ fn the_shapes_are_still_right() {
     );
 
     let hex = FullGrid::hexagon(3);
-    let c = hex.index_of(Hex::new(0, 0)).unwrap();
+    let c = hex.at(Hex::new(0, 0));
     assert_eq!(hex.within(c, 1, 1).len(), 6);
     assert_eq!(hex.within(c, 1, 2).len(), 18, "6 + 12");
 }

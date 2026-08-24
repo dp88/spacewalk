@@ -18,7 +18,7 @@ fn on_open_ground_reaching_and_reachable_agree() {
     // can get to me" describe the same set — and if they disagreed here, the reverse table is wrong.
     let g = FullGrid::square(9, 9, Adjacency::Four);
     let m = Movement::scan(&g, |_| Some(10));
-    let centre = g.index_of(Sq::new(4, 4)).unwrap();
+    let centre = g.at(Sq::new(4, 4));
 
     let out: Vec<_> = g.reachable(centre, 30, &m);
     let inn: Vec<_> = g.reaching(centre, 30, &m);
@@ -37,7 +37,7 @@ fn a_one_way_ledge_makes_them_disagree() {
     let g = FullGrid::square(1, 5, Adjacency::Four);
     let m = Movement::scan(&g, |s| (s.dir == Dir8::S).then_some(10));
 
-    let bottom = g.index_of(Sq::new(0, 4)).unwrap();
+    let bottom = g.at(Sq::new(0, 4));
 
     assert_eq!(
         g.reaching(bottom, 100, &m).len(),
@@ -50,7 +50,7 @@ fn a_one_way_ledge_makes_them_disagree() {
         "but from the bottom you go nowhere"
     );
 
-    let top = g.index_of(Sq::new(0, 0)).unwrap();
+    let top = g.at(Sq::new(0, 0));
     assert_eq!(
         g.reaching(top, 100, &m).len(),
         1,
@@ -66,8 +66,8 @@ fn a_river_costs_what_it_costs_in_the_direction_it_is_crossed() {
     let g = FullGrid::square(1, 4, Adjacency::Four);
     let m = Movement::scan(&g, |s| Some(if s.dir == Dir8::S { 1 } else { 50 }));
 
-    let mouth = g.index_of(Sq::new(0, 3)).unwrap();
-    let source = g.index_of(Sq::new(0, 0)).unwrap();
+    let mouth = g.at(Sq::new(0, 3));
+    let source = g.at(Sq::new(0, 0));
 
     let to_mouth: Vec<_> = g.reaching(mouth, 10, &m);
     assert!(
@@ -86,7 +86,7 @@ fn one_backward_search_replaces_one_forward_search_per_enemy() {
     let g = FullGrid::square(11, 11, Adjacency::Four);
     let m = Movement::scan(&g, |_| Some(10));
 
-    let enemies = [Sq::new(1, 1), Sq::new(9, 1), Sq::new(5, 9)].map(|c| g.index_of(c).unwrap());
+    let enemies = [Sq::new(1, 1), Sq::new(9, 1), Sq::new(5, 9)].map(|c| g.at(c));
 
     // For each cell, is any enemy able to arrive within two moves?
     let threatened: Vec<_> = g
@@ -113,7 +113,7 @@ fn one_backward_search_replaces_one_forward_search_per_enemy() {
 #[test]
 fn a_blocked_cell_threatens_nobody_and_is_threatened_by_nobody() {
     let g = FullGrid::square(5, 5, Adjacency::Four);
-    let wall = g.index_of(Sq::new(2, 2)).unwrap();
+    let wall = g.at(Sq::new(2, 2));
     let m = Movement::scan(&g, |s| (s.to != wall).then_some(10));
 
     assert_eq!(
@@ -137,7 +137,7 @@ fn in_neighbors_keeps_every_predecessor_even_when_step_is_not_injective() {
     // Dijkstra — slower, still correct. `FullGrid::new` enforces this rather than trusting us.
     let g = FullGrid::new((0..8).map(Funnel), Funnel::DIRS, Metric::scanning(|_, _| 0));
 
-    let two = g.index_of(Funnel(2)).unwrap();
+    let two = g.at(Funnel(2));
     let sources: Vec<i32> = g.in_neighbors(two).map(|(_, i)| g.coord(i).0).collect();
 
     assert!(sources.contains(&4), "4 falls into 2");
@@ -149,7 +149,7 @@ fn in_neighbors_keeps_every_predecessor_even_when_step_is_not_injective() {
 fn reaching_is_deterministic() {
     let g = FullGrid::square(9, 9, Adjacency::Eight);
     let m = Movement::scan(&g, |s| Some(if s.dir.is_diagonal() { 14 } else { 10 }));
-    let goal = g.index_of(Sq::new(4, 4)).unwrap();
+    let goal = g.at(Sq::new(4, 4));
 
     let first = g.reaching(goal, 40, &m);
     for _ in 0..20 {
@@ -163,7 +163,7 @@ fn reaching_survives_the_costs_that_used_to_hang_the_search() {
     // free. That is the payoff for fixing the class rather than the instance.
     let g = FullGrid::square(10, 1, Adjacency::Four);
     let m = Movement::new(|_| Some(700_000_000u32), 0);
-    let end = g.index_of(Sq::new(9, 0)).unwrap();
+    let end = g.at(Sq::new(9, 0));
 
     assert_eq!(g.reaching(end, u32::MAX, &m).len(), 10);
 }

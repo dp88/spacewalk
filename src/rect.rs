@@ -9,9 +9,9 @@
 //! Use it when the board is a plain rectangle. Use [`FullGrid`](crate::FullGrid) for anything else:
 //! holes, a disc, a hex board, or a coordinate of your own.
 
-use crate::coord::{Coord, Dir8, Idx, Metric, Sq};
+use crate::coord::{Coord, Dir8, Idx, Metric, Sq, Tag};
 use crate::full::{Adjacency, MAX_CELLS};
-use crate::grid::{Grid, assert_cell};
+use crate::grid::{Grid, same_grid, slot};
 
 /// A `w × h` rectangle of square cells, in row-major order, with no derived geometry stored.
 ///
@@ -28,7 +28,7 @@ use crate::grid::{Grid, assert_cell};
 /// use spacewalk::{Adjacency, Dir8, Grid, RectGrid, Sq};
 ///
 /// let g = RectGrid::new(8, 8, Adjacency::Four);
-/// let a1 = g.index_of(Sq::new(0, 7)).unwrap();
+/// let a1 = g.at(Sq::new(0, 7));
 ///
 /// assert_eq!(g.len(), 64);
 /// assert!(g.step(a1, Dir8::S).is_none(), "the bottom row has no south");
@@ -50,6 +50,12 @@ pub struct RectGrid {
     w: i32,
     h: i32,
     adj: Adjacency,
+    /// This board's numbering. Hashed from the same cell sequence a [`FullGrid::square`] of this
+    /// size emits, so the two agree and their indices travel between them — which is what the
+    /// promise above ("same answers, same indices") is worth only if it is checked.
+    ///
+    /// The generator below is lazy and is never walked in release, where a [`Tag`] is zero-sized.
+    tag: Tag,
 }
 
 impl RectGrid {
@@ -73,7 +79,17 @@ impl RectGrid {
             w as u64 * h as u64,
         );
 
-        Self { w, h, adj }
+        Self {
+            w,
+            h,
+            adj,
+            tag: Tag::of((0..h).flat_map(move |y| (0..w).map(move |x| Sq::new(x, y)))),
+        }
+    }
+
+    /// Mint one of this grid's indices. The single door between a bare number and an [`Idx`].
+    const fn idx(&self, i: u32) -> Idx {
+        Idx::new(self.tag, i)
     }
 }
 
@@ -81,18 +97,22 @@ impl Grid for RectGrid {
     type Cell = Sq;
     type Root = Self;
 
+    fn tag(&self) -> Tag {
+        self.tag
+    }
+
     fn len(&self) -> usize {
         self.w as usize * self.h as usize
     }
 
     fn coord(&self, i: Idx) -> Sq {
-        assert_cell(self.len(), i);
-        Sq::new(i as i32 % self.w, i as i32 / self.w)
+        let cell = slot(self.len(), self.tag, i) as i32;
+        Sq::new(cell % self.w, cell / self.w)
     }
 
     fn index_of(&self, c: Sq) -> Option<Idx> {
         let on = (0..self.w).contains(&c.x) && (0..self.h).contains(&c.y);
-        on.then(|| (c.y * self.w + c.x) as Idx)
+        on.then(|| self.idx((c.y * self.w + c.x) as u32))
     }
 
     fn dirs(&self) -> &[Dir8] {
@@ -103,7 +123,7 @@ impl Grid for RectGrid {
     }
 
     fn step(&self, i: Idx, d: Dir8) -> Option<Idx> {
-        assert_cell(self.len(), i);
+        let _ = slot(self.len(), self.tag, i);
         if !self.dirs().contains(&d) {
             return None;
         }
@@ -111,7 +131,6 @@ impl Grid for RectGrid {
     }
 
     fn neighbors(&self, i: Idx) -> impl Iterator<Item = (Dir8, Idx)> {
-        assert_cell(self.len(), i);
         let c = self.coord(i);
         self.dirs()
             .iter()
@@ -119,7 +138,6 @@ impl Grid for RectGrid {
     }
 
     fn in_neighbors(&self, j: Idx) -> impl Iterator<Item = (Dir8, Idx)> {
-        assert_cell(self.len(), j);
         let c = self.coord(j);
         self.dirs()
             .iter()
@@ -138,12 +156,13 @@ impl Grid for RectGrid {
     }
 
     fn to_root(&self, i: Idx) -> Idx {
-        assert_cell(self.len(), i);
+        let _ = slot(self.len(), self.tag, i);
         i
     }
 
     fn of_root(&self, i: Idx) -> Option<Idx> {
-        ((i as usize) < self.len()).then_some(i)
+        same_grid(self.tag, i);
+        ((i.raw() as usize) < self.len()).then_some(i)
     }
 }
 
@@ -195,20 +214,20 @@ mod tests {
 
             let a = stored
                 .path(
-                    stored.index_of(from).unwrap(),
-                    stored.index_of(to).unwrap(),
+                    stored.at(from),
+                    stored.at(to),
                     &Movement::scan(&stored, |s| cost(stored.coord(s.to))),
                 )
                 .unwrap();
             let b = rect
                 .path(
-                    rect.index_of(from).unwrap(),
-                    rect.index_of(to).unwrap(),
+                    rect.at(from),
+                    rect.at(to),
                     &Movement::scan(&rect, |s| cost(rect.coord(s.to))),
                 )
                 .unwrap();
 
-            assert_eq!((a.steps, a.cost), (b.steps, b.cost), "{adj:?}");
+            assert_eq!((a.steps(), a.cost()), (b.steps(), b.cost()), "{adj:?}");
         }
     }
 }

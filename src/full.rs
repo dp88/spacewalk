@@ -12,17 +12,16 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use crate::coord::{Coord, Dir6, Dir8, Hex, Idx, Metric, Sq};
-use crate::grid::{Grid, assert_cell};
+use crate::coord::{Coord, Dir6, Dir8, Hex, Idx, Metric, Sq, Tag};
+use crate::grid::{Grid, same_grid, slot};
 use crate::layout::Offset;
 
-/// The step table's empty slot. `Idx::MAX` cells will never exist.
-const NONE: Idx = Idx::MAX;
-
-/// A step-table slot as an `Option`: the sentinel [`NONE`] becomes `None`.
-fn reached(j: Idx) -> Option<Idx> {
-    (j != NONE).then_some(j)
-}
+/// The step table's empty slot. `u32::MAX` cells will never exist.
+///
+/// The tables below hold bare `u32`, not [`Idx`]. They are this grid's own storage, every entry in
+/// them is this grid's by construction, and a tag on each would be a tag repeated `cells × dirs`
+/// times to say one thing. An [`Idx`] is minted on the way out, in [`FullGrid::idx`].
+const NONE: u32 = u32::MAX;
 
 /// The most cells a grid may hold: 2²⁴, or 16,777,216. A 4096 × 4096 board.
 ///
@@ -77,7 +76,7 @@ pub enum Adjacency {
 /// use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Sq};
 ///
 /// let g = FullGrid::square(8, 8, Adjacency::Four);
-/// let a1 = g.index_of(Sq::new(0, 7)).unwrap();
+/// let a1 = g.at(Sq::new(0, 7));
 ///
 /// assert_eq!(g.len(), 64);
 /// assert!(g.step(a1, Dir8::S).is_none(), "the bottom row has no south");
@@ -89,7 +88,7 @@ pub struct FullGrid<C: Coord> {
     /// Every cell's coordinate, in index order: `cells[i]` is the coordinate of cell `i`.
     cells: Vec<C>,
     /// The reverse lookup: coordinate to index. `index_of` is one probe of this map.
-    index: HashMap<C, Idx>,
+    index: HashMap<C, u32>,
     /// The direction alphabet, fixing the column order of `steps`.
     dirs: Vec<C::Dir>,
     /// Flat, `cells.len() * dirs.len()`. `steps[i * dirs.len() + d]` is the cell reached by
@@ -98,7 +97,7 @@ pub struct FullGrid<C: Coord> {
     /// Flat and direction-indexed, not a compacted neighbour list. The distinction matters: a
     /// compacted list cannot answer "which of these is my north-east?", and a checkers man that
     /// may only move forward needs exactly that.
-    steps: Vec<Idx>,
+    steps: Vec<u32>,
     /// The step table, reversed: who can step *into* each cell.
     ///
     /// A multimap in compressed-row form, not a mirror of `steps`, and that is deliberate. Mirroring
@@ -109,6 +108,8 @@ pub struct FullGrid<C: Coord> {
     back: Back,
     /// How distance is measured and range queries are answered. See [`Metric`].
     metric: Metric<C>,
+    /// This board's numbering, hashed from `cells`. See [`Tag`].
+    tag: Tag,
 }
 
 /// In-edges, in compressed-row form: the predecessors of cell `j` are `from[start[j]..start[j+1]]`,
@@ -116,13 +117,13 @@ pub struct FullGrid<C: Coord> {
 #[derive(Debug, Clone, Default)]
 struct Back {
     start: Vec<u32>,
-    from: Vec<Idx>,
+    from: Vec<u32>,
     dir: Vec<u8>,
 }
 
 impl Back {
     /// Invert the step table in two passes: count what arrives where, then place it.
-    fn of(steps: &[Idx], cells: usize, dirs: usize) -> Self {
+    fn of(steps: &[u32], cells: usize, dirs: usize) -> Self {
         let mut start = vec![0u32; cells + 1];
         for &j in steps {
             if j != NONE {
@@ -142,7 +143,7 @@ impl Back {
                 continue;
             }
             let put = at[j as usize] as usize;
-            from[put] = (slot / dirs) as Idx;
+            from[put] = (slot / dirs) as u32;
             dir[put] = (slot % dirs) as u8;
             at[j as usize] += 1;
         }
@@ -182,7 +183,7 @@ impl<C: Coord> FullGrid<C> {
         let mut index = HashMap::new();
         for c in cells {
             if let Entry::Vacant(slot) = index.entry(c) {
-                slot.insert(ordered.len() as Idx);
+                slot.insert(ordered.len() as u32);
                 ordered.push(c);
             }
 
@@ -215,7 +216,7 @@ impl<C: Coord> FullGrid<C> {
                 //
                 // It costs one metric call per edge, in the loop that was walking the edges anyway.
                 if j != NONE {
-                    let span = (metric.distance)(c, ordered[j as usize]);
+                    let span = metric.distance(c, ordered[j as usize]);
                     assert!(
                         span <= 1,
                         "a step from {c:?} to {:?} covers {span} under this metric, but a step is \
@@ -234,6 +235,7 @@ impl<C: Coord> FullGrid<C> {
 
         let back = Back::of(&steps, ordered.len(), dirs.len());
         Self {
+            tag: Tag::of(ordered.iter()),
             cells: ordered,
             index,
             dirs: dirs.to_vec(),
@@ -241,6 +243,16 @@ impl<C: Coord> FullGrid<C> {
             back,
             metric,
         }
+    }
+
+    /// Mint one of this grid's indices. The single door between a raw table slot and an [`Idx`].
+    const fn idx(&self, i: u32) -> Idx {
+        Idx::new(self.tag, i)
+    }
+
+    /// A step-table slot as an `Option`: the sentinel [`NONE`] becomes `None`.
+    fn reached(&self, j: u32) -> Option<Idx> {
+        (j != NONE).then(|| self.idx(j))
     }
 
     /// A **new** board holding only the cells that pass `keep`.
@@ -280,17 +292,20 @@ impl<C: Coord> Grid for FullGrid<C> {
     type Cell = C;
     type Root = Self;
 
+    fn tag(&self) -> Tag {
+        self.tag
+    }
+
     fn len(&self) -> usize {
         self.cells.len()
     }
 
     fn coord(&self, i: Idx) -> C {
-        assert_cell(self.len(), i);
-        self.cells[i as usize]
+        self.cells[slot(self.len(), self.tag, i)]
     }
 
     fn index_of(&self, c: C) -> Option<Idx> {
-        self.index.get(&c).copied()
+        self.index.get(&c).map(|&i| self.idx(i))
     }
 
     fn dirs(&self) -> &[C::Dir] {
@@ -298,27 +313,31 @@ impl<C: Coord> Grid for FullGrid<C> {
     }
 
     fn step(&self, i: Idx, d: C::Dir) -> Option<Idx> {
-        assert_cell(self.len(), i);
-        let slot = self.dirs.iter().position(|&x| x == d)?;
-        reached(self.steps[i as usize * self.dirs.len() + slot])
+        let cell = slot(self.len(), self.tag, i);
+        let at = self.dirs.iter().position(|&x| x == d)?;
+        self.reached(self.steps[cell * self.dirs.len() + at])
     }
 
     fn neighbors(&self, i: Idx) -> impl Iterator<Item = (C::Dir, Idx)> {
-        assert_cell(self.len(), i);
-        let base = i as usize * self.dirs.len();
+        let base = slot(self.len(), self.tag, i) * self.dirs.len();
         self.dirs
             .iter()
             .enumerate()
-            .filter_map(move |(slot, &d)| reached(self.steps[base + slot]).map(|j| (d, j)))
+            .filter_map(move |(at, &d)| self.reached(self.steps[base + at]).map(|j| (d, j)))
     }
 
     fn in_neighbors(&self, j: Idx) -> impl Iterator<Item = (C::Dir, Idx)> {
-        assert_cell(self.len(), j);
+        let cell = slot(self.len(), self.tag, j);
         let (lo, hi) = (
-            self.back.start[j as usize] as usize,
-            self.back.start[j as usize + 1] as usize,
+            self.back.start[cell] as usize,
+            self.back.start[cell + 1] as usize,
         );
-        (lo..hi).map(move |k| (self.dirs[self.back.dir[k] as usize], self.back.from[k]))
+        (lo..hi).map(move |k| {
+            (
+                self.dirs[self.back.dir[k] as usize],
+                self.idx(self.back.from[k]),
+            )
+        })
     }
 
     fn metric(&self) -> Metric<C> {
@@ -330,12 +349,13 @@ impl<C: Coord> Grid for FullGrid<C> {
     }
 
     fn to_root(&self, i: Idx) -> Idx {
-        assert_cell(self.len(), i);
+        let _ = slot(self.len(), self.tag, i);
         i
     }
 
     fn of_root(&self, i: Idx) -> Option<Idx> {
-        ((i as usize) < self.len()).then_some(i)
+        same_grid(self.tag, i);
+        ((i.raw() as usize) < self.len()).then_some(i)
     }
 }
 
@@ -392,7 +412,7 @@ impl FullGrid<Sq> {
     /// let g = FullGrid::disc(3, Adjacency::Four);
     ///
     /// assert_eq!(g.len(), 29);
-    /// assert_eq!(g.coord(0), Sq::new(0, -3));           // the top of the disc, not its centre
+    /// assert_eq!(g.cells().next(), Some(Sq::new(0, -3))); // the top of the disc, not its centre
     /// assert!(g.contains(Sq::new(2, 2)));               // 8 <= 9, so the near corner is in
     /// assert!(!g.contains(Sq::new(3, 3)));              // and the corner of the box is not
     /// ```
@@ -481,7 +501,7 @@ impl FullGrid<Hex> {
     /// assert_eq!(g.len(), 240);
     ///
     /// // The map file's cell (7, 3) is this one, and it knows nothing about offset coordinates.
-    /// let cell = g.index_of(Offset::OddR.to_hex(7, 3)).unwrap();
+    /// let cell = g.at(Offset::OddR.to_hex(7, 3));
     /// assert_eq!(Offset::OddR.from_hex(g.coord(cell)), (7, 3));
     /// ```
     ///
@@ -511,12 +531,19 @@ mod tests {
     fn a_rectangle_has_width_times_height_cells() {
         let g = FullGrid::square(5, 3, Adjacency::Four);
         assert_eq!(g.len(), 15);
+
+        let mut cells = g.cells();
         assert_eq!(
-            g.coord(0),
-            Sq::new(0, 0),
+            cells.next(),
+            Some(Sq::new(0, 0)),
             "row-major: index 0 is the top-left"
         );
-        assert_eq!(g.coord(5), Sq::new(0, 1));
+        assert_eq!(
+            cells.nth(3),
+            Some(Sq::new(4, 0)),
+            "then along the first row"
+        );
+        assert_eq!(cells.next(), Some(Sq::new(0, 1)), "then down to the second");
     }
 
     #[test]
@@ -530,7 +557,7 @@ mod tests {
     #[test]
     fn four_way_grids_have_no_diagonal_steps_at_all() {
         let g = FullGrid::square(3, 3, Adjacency::Four);
-        let mid = g.index_of(Sq::new(1, 1)).unwrap();
+        let mid = g.at(Sq::new(1, 1));
 
         assert_eq!(g.neighbors(mid).count(), 4);
         assert!(g.step(mid, Dir8::Ne).is_none());
@@ -539,14 +566,14 @@ mod tests {
     #[test]
     fn eight_way_grids_have_eight_neighbours_in_the_middle_and_three_in_a_corner() {
         let g = FullGrid::square(3, 3, Adjacency::Eight);
-        assert_eq!(g.neighbors(g.index_of(Sq::new(1, 1)).unwrap()).count(), 8);
-        assert_eq!(g.neighbors(g.index_of(Sq::new(0, 0)).unwrap()).count(), 3);
+        assert_eq!(g.neighbors(g.at(Sq::new(1, 1))).count(), 8);
+        assert_eq!(g.neighbors(g.at(Sq::new(0, 0))).count(), 3);
     }
 
     #[test]
     fn steps_off_the_board_are_none() {
         let g = FullGrid::square(3, 3, Adjacency::Eight);
-        let corner = g.index_of(Sq::new(0, 0)).unwrap();
+        let corner = g.at(Sq::new(0, 0));
         assert!(g.step(corner, Dir8::N).is_none());
         assert!(g.step(corner, Dir8::W).is_none());
         assert!(g.step(corner, Dir8::Se).is_some());
@@ -582,8 +609,8 @@ mod tests {
         // a unit reports the enemy beside it as in range and then cannot walk to it.
         for (adj, dirs, diagonal) in [(Adjacency::Four, 4, 2), (Adjacency::Eight, 8, 1)] {
             let g = FullGrid::disc(3, adj);
-            let centre = g.index_of(Sq::new(0, 0)).unwrap();
-            let corner = g.index_of(Sq::new(1, 1)).unwrap();
+            let centre = g.at(Sq::new(0, 0));
+            let corner = g.at(Sq::new(1, 1));
 
             assert_eq!(g.neighbors(centre).count(), dirs, "{adj:?}");
             assert_eq!(g.distance(centre, corner), diagonal, "{adj:?}");
@@ -605,10 +632,10 @@ mod tests {
     #[test]
     fn a_hex_cell_has_six_neighbours_unless_it_is_on_the_rim() {
         let g = FullGrid::hexagon(2);
-        let centre = g.index_of(Hex::new(0, 0)).unwrap();
+        let centre = g.at(Hex::new(0, 0));
         assert_eq!(g.neighbors(centre).count(), 6);
 
-        let rim = g.index_of(Hex::new(2, 0)).unwrap();
+        let rim = g.at(Hex::new(2, 0));
         assert_eq!(g.neighbors(rim).count(), 3);
     }
 
@@ -655,7 +682,7 @@ mod tests {
         assert!(!holed.contains(Sq::new(1, 1)));
 
         // The cell above the hole can no longer step down into it.
-        let above = holed.index_of(Sq::new(1, 0)).unwrap();
+        let above = holed.at(Sq::new(1, 0));
         assert!(holed.step(above, Dir8::S).is_none());
     }
 
@@ -667,6 +694,10 @@ mod tests {
             Metric::MANHATTAN,
         );
         assert_eq!(g.len(), 2);
-        assert_eq!(g.index_of(Sq::new(0, 0)), Some(0));
+        assert_eq!(
+            g.index_of(Sq::new(0, 0)),
+            g.indices().next(),
+            "the first occurrence kept its place, so it is still cell zero"
+        );
     }
 }

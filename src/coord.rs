@@ -8,8 +8,9 @@
 //! with an exotic board implements the trait itself; see `tests/chess3d.rs`, which builds a
 //! three-layer chess board in a few dozen lines without touching this crate.
 
+use std::cmp::Ordering;
 use std::fmt;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub};
 
 #[cfg(feature = "serde")]
@@ -42,10 +43,22 @@ fn clamp_u32(d: i64) -> u32 {
 ///
 /// Both branches give the same answer. The choice is only ever about which is cheaper.
 ///
+/// # The parts arrive together
+///
+/// The fields are private, and there are exactly two ways in: [`Metric::scanning`], which asks for
+/// `distance` alone, and [`Metric::tabulated`], which asks for all three at once. That is not
+/// bookkeeping — the invariants below relate the three, so a metric assembled a field at a time is
+/// a metric that can be half right. A wrong `count` does not fail loudly; it silently picks the
+/// slower branch, or asks for an offset table sized by a radius.
+///
 /// # Invariants
 ///
+/// These are checked where they can be and stated where they cannot. Read them on the constructor
+/// you use.
+///
 /// - `distance` must never **over**estimate the number of steps between two cells, or A\* stops
-///   being admissible and quietly returns non-optimal paths.
+///   being admissible and quietly returns non-optimal paths. [`FullGrid::new`](crate::FullGrid::new)
+///   does check the other side of this — that no single step covers more than one unit — and panics.
 /// - `deltas(r)` must agree with `distance`: it must yield exactly the offsets `d` for which
 ///   `distance(c, c + d) <= r`, each paired with that distance. This means the metric must be
 ///   **translation invariant** — the same everywhere on the board. If yours is not, use
@@ -54,14 +67,14 @@ fn clamp_u32(d: i64) -> u32 {
 #[derive(Clone, Copy)]
 pub struct Metric<C: Coord> {
     /// The number of steps between two cells. Never an overestimate.
-    pub distance: fn(C, C) -> u32,
+    distance: fn(C, C) -> u32,
     /// How many offsets lie within `r`. **Must not allocate** — that is the whole point of it.
     /// Saturate at [`u64::MAX`], which reads as "more than any board" and forces the scan.
-    pub count: fn(u32) -> u64,
+    count: fn(u32) -> u64,
     /// Every offset within `r` of the origin, each with its distance. In a fixed order.
     ///
     /// Only ever called when `count(r)` is no larger than the board, so it cannot run away.
-    pub deltas: fn(u32) -> Vec<(C, u32)>,
+    deltas: fn(u32) -> Vec<(C, u32)>,
 
     /// The cell `t/n` of the way along the straight line from `a` to `b`, rounded to the lattice.
     /// `None` if this lattice has no notion of a straight line.
@@ -71,7 +84,7 @@ pub struct Metric<C: Coord> {
     /// to *your* code, sized by *your* coordinates, where the crate can no longer bound it. Two
     /// cells a billion apart would ask for a billion-element vector to describe a line touching two
     /// cells. Returning one cell at a time makes that impossible rather than merely discouraged.
-    pub lerp: Option<Lerp<C>>,
+    lerp: Option<Lerp<C>>,
 }
 
 /// The cell `t/n` of the way from `a` to `b`, rounded to the lattice. See [`Metric::lerp`].
@@ -93,13 +106,90 @@ impl<C: Coord> Metric<C> {
     /// It is also the right answer for a board with many dimensions. Offsets grow as `(2r+1)ᵈ`, so
     /// on a three-dimensional board `r = 1000` is eight billion offsets — vastly worse than
     /// scanning. `tests/chess3d.rs` uses this.
-    pub fn scanning(distance: fn(C, C) -> u32) -> Self {
+    ///
+    /// `distance` must not **over**estimate the number of steps between two cells. That is the one
+    /// promise this constructor cannot check, and breaking it makes A\* return non-optimal paths
+    /// without saying so. When in doubt, underestimate: a metric that always returns 0 is always
+    /// admissible, and turns A\* into Dijkstra — slower, still correct.
+    #[must_use]
+    pub const fn scanning(distance: fn(C, C) -> u32) -> Self {
         Self {
             distance,
             count: |_| u64::MAX,
             deltas: |_| Vec::new(),
             lerp: None,
         }
+    }
+
+    /// A metric with an offset table, so a range query is priced by the radius, not by the board.
+    ///
+    /// The three arguments are one thing in three parts, which is why they arrive together. See the
+    /// invariants on [`Metric`]: `deltas` must yield exactly the offsets within `r` under
+    /// `distance`, and `count` must report how many of those there would be **without building
+    /// them**. A `count` that allocates defeats the whole mechanism, and one that disagrees with
+    /// `deltas` turns a range query into either a needless board scan or a memory bomb.
+    ///
+    /// Only worth it for a translation-invariant metric on a lattice of one or two dimensions.
+    /// Anything else wants [`Metric::scanning`].
+    #[must_use]
+    pub const fn tabulated(
+        distance: fn(C, C) -> u32,
+        count: fn(u32) -> u64,
+        deltas: fn(u32) -> Vec<(C, u32)>,
+    ) -> Self {
+        Self {
+            distance,
+            count,
+            deltas,
+            lerp: None,
+        }
+    }
+
+    /// Give this metric a straight line, which is what [`Grid::los`](crate::Grid::los) needs.
+    ///
+    /// Without one, sight falls back to nothing: a lattice that cannot say which cells lie between
+    /// two others cannot say what blocks a view. Not every lattice has a sensible answer — a
+    /// three-layer chess board does not — and saying so is better than guessing.
+    #[must_use]
+    pub const fn with_lerp(mut self, lerp: Lerp<C>) -> Self {
+        self.lerp = Some(lerp);
+        self
+    }
+
+    /// The number of steps between two cells, as this metric counts them.
+    #[must_use]
+    pub fn distance(&self, a: C, b: C) -> u32 {
+        (self.distance)(a, b)
+    }
+
+    /// How many offsets lie within `r`, without building them. See [`Metric::tabulated`].
+    #[must_use]
+    pub fn count(&self, r: u32) -> u64 {
+        (self.count)(r)
+    }
+
+    /// Every offset within `r` of the origin, each with its distance.
+    ///
+    /// Ask [`count`](Metric::count) first. This is only bounded when the answer is.
+    #[must_use]
+    pub fn deltas(&self, r: u32) -> Vec<(C, u32)> {
+        (self.deltas)(r)
+    }
+
+    /// The cell `t/n` of the way from `a` to `b`, or `None` if this lattice has no straight line.
+    #[must_use]
+    pub fn lerp(&self, a: C, b: C, t: u32, n: u32) -> Option<C> {
+        self.lerp.map(|f| f(a, b, t, n))
+    }
+
+    /// Whether this lattice has a notion of a straight line at all.
+    ///
+    /// [`Grid::los`](crate::Grid::los) and [`Grid::line`](crate::Grid::line) need one, and answer
+    /// with nothing when there is none. A three-layer chess board is the honest case: no two cells
+    /// on different layers have cells "between" them in any sense worth blocking sight with.
+    #[must_use]
+    pub fn has_lerp(&self) -> bool {
+        self.lerp.is_some()
     }
 }
 
@@ -223,28 +313,28 @@ fn square_deltas(r: u32, metric: fn(Sq, Sq) -> u32) -> Vec<(Sq, u32)> {
 
 impl Metric<Sq> {
     /// `|dx| + |dy|`. Four-way movement: range 1 is a plus sign, range 2 a diamond.
-    pub const MANHATTAN: Self = Self {
-        distance: |a, b| a.manhattan(b),
-        count: |r| count_centered(2, r),
-        deltas: |r| square_deltas(r, |a, b| a.manhattan(b)),
-        lerp: Some(sq_lerp),
-    };
+    pub const MANHATTAN: Self = Self::tabulated(
+        |a, b| a.manhattan(b),
+        |r| count_centered(2, r),
+        |r| square_deltas(r, |a, b| a.manhattan(b)),
+    )
+    .with_lerp(sq_lerp);
 
     /// `max(|dx|, |dy|)`. Eight-way movement: range 1 is the eight surrounding cells.
-    pub const CHEBYSHEV: Self = Self {
-        distance: |a, b| a.chebyshev(b),
-        count: count_chebyshev,
-        deltas: |r| square_deltas(r, |a, b| a.chebyshev(b)),
-        lerp: Some(sq_lerp),
-    };
+    pub const CHEBYSHEV: Self = Self::tabulated(
+        |a, b| a.chebyshev(b),
+        count_chebyshev,
+        |r| square_deltas(r, |a, b| a.chebyshev(b)),
+    )
+    .with_lerp(sq_lerp);
 }
 
 impl Metric<Hex> {
     /// Cube distance on a hex lattice.
-    pub const HEX: Self = Self {
-        distance: |a, b| a.distance(b),
-        count: |r| count_centered(3, r),
-        deltas: |r| {
+    pub const HEX: Self = Self::tabulated(
+        |a, b| a.distance(b),
+        |r| count_centered(3, r),
+        |r| {
             let reach = i64::from(r).min(i64::from(i32::MAX));
             let mut out = Vec::new();
             for dq in -reach..=reach {
@@ -258,15 +348,178 @@ impl Metric<Hex> {
             }
             out
         },
-        lerp: Some(hex_lerp),
-    };
+    )
+    .with_lerp(hex_lerp);
+}
+
+/// Which board's numbering an [`Idx`] belongs to.
+///
+/// A tag names a *numbering*, not an object. Two boards that number the same cells in the same
+/// order share one, and their indices are interchangeable — which is the property
+/// [`FullGrid::new`](crate::FullGrid::new) promises and `tests/save.rs` rests on. A tag derived
+/// from a counter would break that, so this is derived from the cells.
+///
+/// In release builds this is a zero-sized type: every check below compiles to nothing, and an
+/// [`Idx`] is a bare `u32` again.
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Tag(u32);
+
+/// Which board's numbering an [`Idx`] belongs to. Zero-sized in release; see the debug definition.
+#[cfg(not(debug_assertions))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Tag;
+
+impl Tag {
+    /// Derive a tag from a board's cells, in index order.
+    ///
+    /// The iterator is **never consumed in release**, so a caller may hand over one that would be
+    /// expensive to walk — [`RectGrid`](crate::RectGrid) generates its cells for exactly this and
+    /// pays nothing for them in a shipped build.
+    #[cfg(debug_assertions)]
+    pub fn of<H: Hash>(items: impl IntoIterator<Item = H>) -> Self {
+        use std::hash::{DefaultHasher, Hasher};
+
+        let mut h = DefaultHasher::new();
+        let mut n: u64 = 0;
+        for item in items {
+            item.hash(&mut h);
+            n += 1;
+        }
+        // Length is mixed in last so that a prefix of another board's cells cannot collide with it.
+        h.write_u64(n);
+        // Forced odd, which keeps zero free to mean [`Tag::ANY`].
+        #[allow(clippy::cast_possible_truncation)]
+        Self(h.finish() as u32 | 1)
+    }
+
+    /// Derive a tag from a board's cells, in index order. Ignores its argument in release.
+    #[cfg(not(debug_assertions))]
+    pub fn of<H: Hash>(items: impl IntoIterator<Item = H>) -> Self {
+        let _ = items;
+        Self
+    }
+
+    /// Whether an index carrying `self` may be handed to a board carrying `other`.
+    ///
+    /// Equal tags, or [`Tag::ANY`] on either side. One definition serves both profiles: in release
+    /// a `Tag` is zero-sized, so every arm is trivially true — and every caller is inside a
+    /// `debug_assert`, which is gone by then anyway.
+    pub(crate) fn agrees(self, other: Self) -> bool {
+        self == other || self == Self::ANY || other == Self::ANY
+    }
+}
+
+impl Tag {
+    /// A tag that matches every board: what an index carries when nothing named its grid.
+    ///
+    /// One thing mints these — [`CellMap::iter`](crate::CellMap::iter) on a map that came back from
+    /// serde, which has no grid to name. Dropping the check there is deliberate: what makes such a
+    /// map line up is the cells saved beside it, and those are already the rule. See `tests/save.rs`.
+    pub(crate) const ANY: Self = Self::any();
+
+    #[cfg(debug_assertions)]
+    const fn any() -> Self {
+        Self(0)
+    }
+
+    #[cfg(not(debug_assertions))]
+    const fn any() -> Self {
+        Self
+    }
 }
 
 /// A cell's dense index within one [`Grid`](crate::Grid).
 ///
 /// Indices are assigned at construction and are stable for that grid's lifetime — but they mean
 /// nothing to any *other* grid. **Serialize coordinates, never indices.**
-pub type Idx = u32;
+///
+/// # It carries the board it came from
+///
+/// In a debug build an `Idx` also holds a [`Tag`], and every method that takes one checks it. That
+/// turns the crate's sharpest failure — an index from one board silently addressing a *different
+/// cell* on another — into a panic that names the mistake. The check finds the case a bounds check
+/// never could: two boards of the same size, where every index is in range for both.
+///
+/// In release the tag is zero-sized and the checks vanish, so this is a bare `u32` in a shipped
+/// build. Equality, ordering, and hashing compare **the index alone** in both profiles, so no
+/// behaviour depends on which one you built.
+#[derive(Clone, Copy)]
+pub struct Idx {
+    i: u32,
+    tag: Tag,
+}
+
+impl Idx {
+    /// Mint an index for a board. Crate-internal: only a board may number its own cells.
+    pub(crate) const fn new(tag: Tag, i: u32) -> Self {
+        Self { i, tag }
+    }
+
+    /// The bare number, for keying a structure of your own.
+    ///
+    /// Reading an index out is safe; there is deliberately no way back in. Only a board mints an
+    /// [`Idx`], so a number you took from one cannot be handed to a different board as though it
+    /// belonged there — which is the whole mistake this type exists to stop.
+    ///
+    /// Reach for [`CellMap`](crate::CellMap) first when what you want is one value per cell: it is
+    /// sized from the board, subscripted by an `Idx` directly, and it carries the same check.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.i
+    }
+
+    /// The bare number, for indexing the crate's own tables.
+    pub(crate) const fn raw(self) -> u32 {
+        self.i
+    }
+
+    /// The board this index was issued by.
+    pub(crate) const fn tag(self) -> Tag {
+        self.tag
+    }
+}
+
+// Hand-written, and on `i` alone. Deriving these would compare the tag, and a value that compares
+// differently in debug than in release is a far worse bug than the one the tag exists to catch.
+impl PartialEq for Idx {
+    fn eq(&self, o: &Self) -> bool {
+        self.i == o.i
+    }
+}
+
+impl Eq for Idx {}
+
+impl PartialOrd for Idx {
+    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
+        Some(self.cmp(o))
+    }
+}
+
+impl Ord for Idx {
+    fn cmp(&self, o: &Self) -> Ordering {
+        self.i.cmp(&o.i)
+    }
+}
+
+impl Hash for Idx {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.i.hash(h);
+    }
+}
+
+// Transparent on purpose: an index reads as a number in a panic message and in a failed assertion.
+impl fmt::Debug for Idx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.i)
+    }
+}
+
+impl fmt::Display for Idx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.i)
+    }
+}
 
 /// A cell address, and the directions leading out of it.
 ///

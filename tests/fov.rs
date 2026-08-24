@@ -8,20 +8,20 @@
 //! Real sight needs a straight line in *coordinate* space, which is lattice-specific — so it lives
 //! on the [`Metric`], and the grid drives the walk one cell at a time.
 
-use spacewalk::{Adjacency, FullGrid, Grid, Hex, MAX_SIGHT, Sq};
+use spacewalk::{Adjacency, FullGrid, Grid, Hex, Idx, MAX_SIGHT, Sq};
 
 mod common;
 
 /// Nothing blocks.
-fn clear(_: u32) -> bool {
+fn clear(_: Idx) -> bool {
     false
 }
 
 #[test]
 fn a_line_starts_where_you_are_and_ends_where_you_look() {
     let g = FullGrid::square(8, 8, Adjacency::Eight);
-    let a = g.index_of(Sq::new(0, 0)).unwrap();
-    let b = g.index_of(Sq::new(5, 0)).unwrap();
+    let a = g.at(Sq::new(0, 0));
+    let b = g.at(Sq::new(5, 0));
 
     let cells: Vec<Sq> = g.line(a, b).iter().map(|&i| g.coord(i)).collect();
     assert_eq!(cells.first(), Some(&Sq::new(0, 0)));
@@ -35,7 +35,7 @@ fn a_line_to_yourself_is_just_you() {
     // from a cell to itself divided by zero, rounded the resulting NaN to 0, and returned the
     // ORIGIN of the coordinate space — a cell on the far side of the board.
     let g = FullGrid::square(8, 8, Adjacency::Eight);
-    let me = g.index_of(Sq::new(6, 6)).unwrap();
+    let me = g.at(Sq::new(6, 6));
 
     assert_eq!(g.line(me, me), vec![me]);
     assert!(g.los(me, me, clear), "you can see yourself");
@@ -65,8 +65,8 @@ fn sight_is_symmetric() {
 #[test]
 fn a_line_reversed_is_the_reverse_of_the_line() {
     let g = FullGrid::square(12, 12, Adjacency::Eight);
-    let a = g.index_of(Sq::new(1, 2)).unwrap();
-    let b = g.index_of(Sq::new(9, 7)).unwrap();
+    let a = g.at(Sq::new(1, 2));
+    let b = g.at(Sq::new(9, 7));
 
     let there = g.line(a, b);
     let mut back = g.line(b, a);
@@ -79,16 +79,16 @@ fn a_line_reversed_is_the_reverse_of_the_line() {
 fn a_wall_casts_a_shadow() {
     // The whole point. A wall due east of you hides what is behind it.
     let g = FullGrid::square(11, 11, Adjacency::Eight);
-    let eye = g.index_of(Sq::new(5, 5)).unwrap();
-    let wall = g.index_of(Sq::new(6, 5)).unwrap();
-    let behind = g.index_of(Sq::new(8, 5)).unwrap();
+    let eye = g.at(Sq::new(5, 5));
+    let wall = g.at(Sq::new(6, 5));
+    let behind = g.at(Sq::new(8, 5));
 
     let blocks = |i| i == wall;
 
     assert!(g.los(eye, wall, blocks), "you see the wall itself");
     assert!(!g.los(eye, behind, blocks), "but not what stands behind it");
     assert!(
-        g.los(eye, g.index_of(Sq::new(5, 8)).unwrap(), blocks),
+        g.los(eye, g.at(Sq::new(5, 8)), blocks),
         "and the rest is clear"
     );
 }
@@ -100,12 +100,12 @@ fn you_cannot_see_round_a_corner() {
     let wall: Vec<Sq> = (0..7).map(|y| Sq::new(3, y)).filter(|c| c.y != 6).collect();
     let blocks = |i| wall.contains(&g.coord(i));
 
-    let eye = g.index_of(Sq::new(0, 0)).unwrap();
-    let beyond = g.index_of(Sq::new(6, 0)).unwrap();
+    let eye = g.at(Sq::new(0, 0));
+    let beyond = g.at(Sq::new(6, 0));
 
     assert!(!g.los(eye, beyond, blocks), "the wall is in the way");
     assert!(
-        g.los(eye, g.index_of(Sq::new(2, 0)).unwrap(), blocks),
+        g.los(eye, g.at(Sq::new(2, 0)), blocks),
         "up to the wall, fine"
     );
 }
@@ -114,7 +114,7 @@ fn you_cannot_see_round_a_corner() {
 fn field_of_view_sees_far_more_than_eight_spokes() {
     // The bug this replaces, quantified. Eight rays reached 40 of the 120 cells in radius 5.
     let g = FullGrid::square(21, 21, Adjacency::Eight);
-    let eye = g.index_of(Sq::new(10, 10)).unwrap();
+    let eye = g.at(Sq::new(10, 10));
 
     let seen = g.visible_from(eye, 5, clear);
     let in_range = g.within(eye, 0, 5);
@@ -134,8 +134,8 @@ fn field_of_view_sees_far_more_than_eight_spokes() {
 #[test]
 fn a_pillar_hides_what_is_behind_it_and_nothing_else() {
     let g = FullGrid::square(21, 21, Adjacency::Eight);
-    let eye = g.index_of(Sq::new(10, 10)).unwrap();
-    let pillar = g.index_of(Sq::new(12, 10)).unwrap();
+    let eye = g.at(Sq::new(10, 10));
+    let pillar = g.at(Sq::new(12, 10));
 
     let seen = g.visible_from(eye, 6, |i| i == pillar);
     let open = g.visible_from(eye, 6, clear);
@@ -151,9 +151,9 @@ fn a_pillar_hides_what_is_behind_it_and_nothing_else() {
 #[test]
 fn hexes_have_sight_too() {
     let g = FullGrid::hexagon(5);
-    let eye = g.index_of(Hex::new(0, 0)).unwrap();
-    let wall = g.index_of(Hex::new(1, 0)).unwrap();
-    let behind = g.index_of(Hex::new(3, 0)).unwrap();
+    let eye = g.at(Hex::new(0, 0));
+    let wall = g.at(Hex::new(1, 0));
+    let behind = g.at(Hex::new(3, 0));
 
     let blocks = |i| i == wall;
     assert!(g.los(eye, wall, blocks));
@@ -168,7 +168,7 @@ fn an_absurd_sight_radius_is_refused_rather_than_attempted() {
     // Raycasting is O(r^3). At r = 1000 that is the better part of a minute of solid compute — a
     // hang made of time rather than memory, but a hang. Same bug class as the one that ate 32GB.
     let g = FullGrid::square(30, 30, Adjacency::Eight);
-    let eye = g.index_of(Sq::new(15, 15)).unwrap();
+    let eye = g.at(Sq::new(15, 15));
 
     let boom = std::panic::catch_unwind(|| g.visible_from(eye, 100_000, clear));
     let msg = *boom.unwrap_err().downcast::<String>().unwrap();
@@ -192,5 +192,8 @@ fn a_custom_coord_without_a_lerp_simply_has_no_sight() {
         Metric::scanning(|a: P, b: P| (b.0 - a.0).unsigned_abs()),
     );
 
-    assert!(g.line(0, 4).is_empty(), "no lerp, no line");
+    assert!(
+        g.line(g.at(P(0)), g.at(P(4))).is_empty(),
+        "no lerp, no line"
+    );
 }

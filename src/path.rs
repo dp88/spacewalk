@@ -24,8 +24,8 @@
 //! use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Movement, Sq};
 //!
 //! let g = FullGrid::square(8, 8, Adjacency::Four);
-//! let wall = g.index_of(Sq::new(4, 4)).unwrap();
-//! let river = g.index_of(Sq::new(2, 2)).unwrap();
+//! let wall = g.at(Sq::new(4, 4));
+//! let river = g.at(Sq::new(2, 2));
 //!
 //! let walk = Movement::scan(&g, |s| match s.to {
 //!     t if t == wall  => None,                                  // impassable
@@ -33,14 +33,14 @@
 //!     _ => Some(10),                                            // open ground
 //! });
 //!
-//! let start = g.index_of(Sq::new(2, 1)).unwrap();
-//! let end   = g.index_of(Sq::new(2, 3)).unwrap();
+//! let start = g.at(Sq::new(2, 1));
+//! let end   = g.at(Sq::new(2, 3));
 //!
 //! // Downstream, straight through the river.
-//! assert_eq!(g.path(start, end, &walk).unwrap().cost, 11);
+//! assert_eq!(g.path(start, end, &walk).unwrap().cost(), 11);
 //!
 //! // Upstream, the current is dear enough that it is cheaper to go around.
-//! assert_eq!(g.path(end, start, &walk).unwrap().cost, 40);
+//! assert_eq!(g.path(end, start, &walk).unwrap().cost(), 40);
 //! ```
 
 use std::fmt;
@@ -50,7 +50,7 @@ use pathfinding::num_traits::Zero;
 use pathfinding::prelude::{astar, dijkstra_reach};
 
 use crate::coord::{Coord, Idx};
-use crate::grid::{Grid, assert_cell, cost_ceiling};
+use crate::grid::{Grid, cost_ceiling, slot};
 
 /// What a step costs.
 ///
@@ -103,7 +103,10 @@ impl Zero for Acc {
 }
 
 /// No predecessor: the search's root, or a cell it never reached.
-const NO_PARENT: Idx = Idx::MAX;
+///
+/// The parent vector holds bare `u32`, not [`Idx`]. It is one slot per cell of the board being
+/// searched, so every entry is that board's by construction.
+const NO_PARENT: u32 = u32::MAX;
 
 /// One step: leaving `from`, entering `to`, travelling in `dir`.
 ///
@@ -220,39 +223,116 @@ impl<F> Movement<F> {
     }
 }
 
+impl Movement<()> {
+    /// Every step costs the same, and every cell is passable.
+    ///
+    /// The prototype's movement rules, and the right answer whenever the board itself is the only
+    /// constraint — a reachability question, a connectivity check, a distance in steps rather than
+    /// in terrain. It is exact rather than measured: the cheapest step is the only step, so there is
+    /// nothing to walk the board for, and [`Movement::scan`]'s O(cells × directions) pass is skipped.
+    ///
+    /// The board is still borrowed, because the ceiling below depends on how big it is.
+    ///
+    /// ```
+    /// use spacewalk::{Adjacency, FullGrid, Grid, Movement, Sq};
+    ///
+    /// let g = FullGrid::square(8, 8, Adjacency::Four);
+    /// let walk = Movement::uniform(&g, 1);
+    ///
+    /// let p = g.path(g.at(Sq::new(0, 0)), g.at(Sq::new(7, 7)), &walk).unwrap();
+    /// assert_eq!(p.len(), 14);
+    /// assert_eq!(p.cost(), 14);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If `cost` is so large that a path across this board could exceed [`Cost::MAX`] — the same
+    /// ceiling [`Movement::scan`] enforces, for the same reason, checked here in one comparison
+    /// rather than one per edge.
+    #[must_use]
+    pub fn uniform<B: Grid + ?Sized>(
+        g: &B,
+        cost: Cost,
+    ) -> Movement<impl Fn(Step<B::Cell>) -> Option<Cost>> {
+        let ceiling = cost_ceiling(g.len());
+        assert!(
+            cost <= ceiling,
+            "a step costs {cost}, but on a board of {} cells no step may cost more than {ceiling} \
+             or a path's total could overflow Cost ({}). Scale your costs down.",
+            g.len(),
+            Cost::MAX,
+        );
+
+        Movement {
+            enter: move |_| Some(cost),
+            min_step: cost,
+        }
+    }
+}
+
 /// A route, and what walking it costs.
 ///
-/// `steps[0]` is where you started — you are never charged for the cell you are already on — and
-/// `steps.last()` is where you end up. A path of one cell is a path that goes nowhere, at no cost.
+/// [`steps`](Path::steps)`[0]` is where you started — you are never charged for the cell you are
+/// already on — and the last is where you end up. A path of one cell is a path that goes nowhere,
+/// at no cost.
 ///
 /// **Do not reverse it.** The graph is directed; the way back may be dearer, or may not exist.
+///
+/// # Only a search builds one
+///
+/// The fields are private, and that is what makes [`destination`](Path::destination) able to return
+/// an [`Idx`] rather than an `Option<Idx>`. A `Path` always has at least one step because the only
+/// things that make one are the searches in this module, and they always set out from somewhere.
+/// When the fields were public that guarantee was not the crate's to give — a caller could write
+/// `Path { steps: vec![], cost: 0 }`, or a route through cells that do not touch — so every method
+/// had to defend against a value the type should never have allowed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Path {
-    /// Every cell walked through, starting with the one you set out from.
-    pub steps: Vec<Idx>,
-    /// What walking it costs. Entering cells only — standing still is free.
-    pub cost: Cost,
+    steps: Vec<Idx>,
+    cost: Cost,
 }
 
 impl Path {
-    /// Where the path ends, or `None` if it has no steps at all.
-    ///
-    /// Every `Path` this crate returns has at least one step, so in practice this is always `Some`.
-    /// It is an `Option` because [`Path`]'s fields are public, so *you* can build one that is not —
-    /// and a method that panicked on a value you were allowed to construct would be a trap.
-    #[must_use]
-    pub fn destination(&self) -> Option<Idx> {
-        self.steps.last().copied()
+    /// Build one. Crate-internal: a route is something a search found, not something you assert.
+    pub(crate) fn of(steps: Vec<Idx>, cost: Cost) -> Self {
+        debug_assert!(!steps.is_empty(), "a search always sets out from somewhere");
+        Self { steps, cost }
     }
 
-    /// How many cells are actually moved through — one fewer than `steps`, which counts the start.
+    /// Every cell walked through, starting with the one you set out from.
     ///
-    /// Saturating, so an empty `Path` is length 0 rather than `usize::MAX`. That is not a
-    /// hypothetical: `steps.len() - 1` on an empty vector wraps in release, and a caller looping
-    /// `0..p.len()` would then run 18 quintillion times.
+    /// Use [`Grid::coords_of`] to turn these into coordinates for drawing.
+    #[must_use]
+    pub fn steps(&self) -> &[Idx] {
+        &self.steps
+    }
+
+    /// What walking it costs. Entering cells only — standing still is free.
+    #[must_use]
+    pub fn cost(&self) -> Cost {
+        self.cost
+    }
+
+    /// Where the path ends.
+    #[must_use]
+    pub fn destination(&self) -> Idx {
+        *self
+            .steps
+            .last()
+            .expect("a Path always has a first cell, so it always has a last")
+    }
+
+    /// Where the path sets out from.
+    #[must_use]
+    pub fn start(&self) -> Idx {
+        self.steps[0]
+    }
+
+    /// How many cells are actually moved through — one fewer than [`steps`](Path::steps), which
+    /// counts the cell you set out from.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.steps.len().saturating_sub(1)
+        self.steps.len() - 1
     }
 
     /// Whether the path goes nowhere: it starts and ends on the same cell.
@@ -302,8 +382,8 @@ where
     B: Grid + ?Sized,
     F: Fn(Step<B::Cell>) -> Option<Cost>,
 {
-    assert_cell(b.len(), start);
-    assert_cell(b.len(), goal);
+    let _ = slot(b.len(), b.tag(), start);
+    let _ = slot(b.len(), b.tag(), goal);
 
     // A* adds this to the running total (`estimated_cost = g + h`), so it must not be allowed
     // to wrap — which is precisely what a `saturating_mul` here used to cause, by handing the
@@ -311,10 +391,8 @@ where
     // so both halves are safe.
     let heuristic = |&i: &Idx| Acc(b.distance(i, goal).saturating_mul(m.min_step));
 
-    astar(&start, |&i| succ(b, i, m), heuristic, |&i| i == goal).map(|(steps, cost)| Path {
-        steps,
-        cost: cost.0,
-    })
+    astar(&start, |&i| succ(b, i, m), heuristic, |&i| i == goal)
+        .map(|(steps, cost)| Path::of(steps, cost.0))
 }
 
 /// Behind [`Grid::path_toward`]: one bounded search, then the parent chain home.
@@ -329,7 +407,7 @@ where
     B: Grid + ?Sized,
     F: Fn(Step<B::Cell>) -> Option<Cost>,
 {
-    assert_cell(b.len(), target);
+    let _ = slot(b.len(), b.tag(), target);
 
     let (seen, parent) = reach(b, start, budget, m);
     let &(goal, cost) = seen
@@ -342,16 +420,17 @@ where
     let mut steps = vec![goal];
     let mut at = goal;
     while at != start {
-        at = parent[at as usize];
+        let up = parent[at.raw() as usize];
         assert!(
-            at != NO_PARENT && steps.len() <= b.len(),
+            up != NO_PARENT && steps.len() <= b.len(),
             "the search's parent chain is broken or cyclic — this is a bug in spacewalk",
         );
+        at = Idx::new(b.tag(), up);
         steps.push(at);
     }
     steps.reverse();
 
-    Some(Path { steps, cost })
+    Some(Path::of(steps, cost))
 }
 
 /// Behind [`Grid::reaching`]: one backward Dijkstra, bounded by the budget.
@@ -360,7 +439,7 @@ where
     B: Grid + ?Sized,
     F: Fn(Step<B::Cell>) -> Option<Cost>,
 {
-    assert_cell(b.len(), goal);
+    let _ = slot(b.len(), b.tag(), goal);
     let cap = Acc(budget);
 
     dijkstra_reach(&goal, |&j| pred(b, j, m))
@@ -384,12 +463,12 @@ pub(crate) fn reach<B, F>(
     start: Idx,
     budget: Cost,
     m: &Movement<F>,
-) -> (Vec<(Idx, Cost)>, Vec<Idx>)
+) -> (Vec<(Idx, Cost)>, Vec<u32>)
 where
     B: Grid + ?Sized,
     F: Fn(Step<B::Cell>) -> Option<Cost>,
 {
-    assert_cell(b.len(), start);
+    let _ = slot(b.len(), b.tag(), start);
 
     let cap = Acc(budget);
     let mut parent = vec![NO_PARENT; b.len()];
@@ -400,7 +479,7 @@ where
             break;
         }
         if let Some(p) = it.parent {
-            parent[it.node as usize] = p;
+            parent[it.node.raw() as usize] = p.raw();
         }
         seen.push((it.node, it.total_cost.0));
     }
@@ -422,16 +501,17 @@ mod tests {
     #[test]
     fn a_path_includes_its_start_and_is_never_charged_for_it() {
         let g = FullGrid::square(5, 5, Adjacency::Four);
-        let a = g.index_of(Sq::new(0, 0)).unwrap();
-        let b = g.index_of(Sq::new(2, 0)).unwrap();
+        let a = g.at(Sq::new(0, 0));
+        let b = g.at(Sq::new(2, 0));
 
         let p = g.path(a, b, &open(&g)).unwrap();
-        assert_eq!(p.steps.len(), 3, "start, middle, end");
-        assert_eq!(p.steps[0], a);
-        assert_eq!(p.destination().unwrap(), b);
+        assert_eq!(p.steps().len(), 3, "start, middle, end");
+        assert_eq!(p.steps()[0], a);
+        assert_eq!(p.destination(), b);
         assert_eq!(p.len(), 2, "two cells moved through");
         assert_eq!(
-            p.cost, 20,
+            p.cost(),
+            20,
             "two steps at 10, and nothing for standing still"
         );
     }
@@ -439,27 +519,24 @@ mod tests {
     #[test]
     fn a_path_to_where_you_already_are_costs_nothing() {
         let g = FullGrid::square(3, 3, Adjacency::Four);
-        let a = g.index_of(Sq::new(1, 1)).unwrap();
+        let a = g.at(Sq::new(1, 1));
 
         let p = g.path(a, a, &open(&g)).unwrap();
-        assert_eq!(p.cost, 0);
-        assert_eq!(p.steps, vec![a]);
+        assert_eq!(p.cost(), 0);
+        assert_eq!(p.steps(), vec![a]);
         assert!(p.is_empty());
     }
 
     #[test]
     fn a_walled_off_cell_has_no_path_to_it() {
         let g = FullGrid::square(3, 3, Adjacency::Four);
-        let target = g.index_of(Sq::new(2, 2)).unwrap();
+        let target = g.at(Sq::new(2, 2));
 
         // Wall off the corner completely.
         let walls = [Sq::new(1, 2), Sq::new(2, 1)];
         let m = Movement::scan(&g, |s| (!walls.contains(&g.coord(s.to))).then_some(10));
 
-        assert!(
-            g.path(g.index_of(Sq::new(0, 0)).unwrap(), target, &m)
-                .is_none()
-        );
+        assert!(g.path(g.at(Sq::new(0, 0)), target, &m).is_none());
     }
 
     #[test]
@@ -468,15 +545,15 @@ mod tests {
         // A road runs along the top row at a third the cost of the mud below it.
         let m = Movement::scan(&g, |s| Some(if g.coord(s.to).y == 0 { 10 } else { 30 }));
 
-        let a = g.index_of(Sq::new(0, 1)).unwrap();
-        let b = g.index_of(Sq::new(4, 1)).unwrap();
+        let a = g.at(Sq::new(0, 1));
+        let b = g.at(Sq::new(4, 1));
 
         // Straight through the mud is 4 x 30 = 120. Up onto the road and back down is
         // 10 (up) + 4 x 10 (along) + 30 (down) = 80.
         let p = g.path(a, b, &m).unwrap();
-        assert_eq!(p.cost, 80);
+        assert_eq!(p.cost(), 80);
         assert!(
-            p.steps.iter().any(|&i| g.coord(i).y == 0),
+            p.steps().iter().any(|&i| g.coord(i).y == 0),
             "it used the road"
         );
     }
@@ -502,11 +579,12 @@ mod tests {
         let g = FullGrid::square(3, 3, Adjacency::Four);
         let m = Movement::scan(&g, |_| None);
 
+        let (from, to) = (g.at(Sq::new(0, 0)), g.at(Sq::new(2, 2)));
         assert_eq!(m.min_step(), 0, "no steps at all: promise nothing");
-        assert!(g.path(0, 8, &m).is_none());
+        assert!(g.path(from, to, &m).is_none());
         assert_eq!(
-            g.reachable(0, 100, &m),
-            vec![(0, 0)],
+            g.reachable(from, 100, &m),
+            vec![(from, 0)],
             "you can still stand still"
         );
     }
@@ -514,7 +592,7 @@ mod tests {
     #[test]
     fn reach_is_bounded_by_the_budget() {
         let g = FullGrid::square(9, 9, Adjacency::Four);
-        let centre = g.index_of(Sq::new(4, 4)).unwrap();
+        let centre = g.at(Sq::new(4, 4));
         let m = open(&g);
 
         // A Manhattan diamond of radius n holds 2n(n+1)+1 cells.
@@ -532,7 +610,7 @@ mod tests {
     fn reach_comes_back_cheapest_first() {
         let g = FullGrid::square(5, 5, Adjacency::Four);
         let costs: Vec<Cost> = g
-            .reachable(g.index_of(Sq::new(2, 2)).unwrap(), 40, &open(&g))
+            .reachable(g.at(Sq::new(2, 2)), 40, &open(&g))
             .iter()
             .map(|&(_, c)| c)
             .collect();
@@ -544,42 +622,40 @@ mod tests {
     #[test]
     fn path_toward_closes_the_distance_when_it_cannot_arrive() {
         let g = FullGrid::square(10, 1, Adjacency::Four);
-        let start = g.index_of(Sq::new(0, 0)).unwrap();
-        let far = g.index_of(Sq::new(9, 0)).unwrap();
+        let start = g.at(Sq::new(0, 0));
+        let far = g.at(Sq::new(9, 0));
 
         // Two moves' worth of budget against a target nine cells away.
         let p = g.path_toward(start, far, 20, &open(&g)).unwrap();
         assert_eq!(
-            g.coord(p.destination().unwrap()),
+            g.coord(p.destination()),
             Sq::new(2, 0),
             "as near as it can get"
         );
-        assert_eq!(p.cost, 20);
+        assert_eq!(p.cost(), 20);
     }
 
     #[test]
     fn path_toward_arrives_when_the_target_is_in_reach() {
         let g = FullGrid::square(10, 1, Adjacency::Four);
-        let start = g.index_of(Sq::new(0, 0)).unwrap();
-        let near = g.index_of(Sq::new(2, 0)).unwrap();
+        let start = g.at(Sq::new(0, 0));
+        let near = g.at(Sq::new(2, 0));
 
         let p = g.path_toward(start, near, 100, &open(&g)).unwrap();
-        assert_eq!(p.destination().unwrap(), near);
+        assert_eq!(p.destination(), near);
     }
 
     #[test]
     fn path_toward_stays_put_when_it_is_already_as_close_as_it_can_be() {
         let g = FullGrid::square(3, 1, Adjacency::Four);
-        let a = g.index_of(Sq::new(0, 0)).unwrap();
+        let a = g.at(Sq::new(0, 0));
 
         // Nowhere to go: every step costs more than the budget.
         let m = Movement::new(|_| Some(10), 10);
-        let p = g
-            .path_toward(a, g.index_of(Sq::new(2, 0)).unwrap(), 0, &m)
-            .unwrap();
+        let p = g.path_toward(a, g.at(Sq::new(2, 0)), 0, &m).unwrap();
 
-        assert_eq!(p.destination().unwrap(), a);
-        assert_eq!(p.cost, 0);
+        assert_eq!(p.destination(), a);
+        assert_eq!(p.cost(), 0);
     }
 
     #[test]
@@ -588,24 +664,24 @@ mod tests {
         // √2, on a scale where an orthogonal step is 10.
         let m = Movement::scan(&g, |s| Some(if s.dir.is_diagonal() { 14 } else { 10 }));
 
-        let a = g.index_of(Sq::new(0, 0)).unwrap();
-        let b = g.index_of(Sq::new(2, 2)).unwrap();
+        let a = g.at(Sq::new(0, 0));
+        let b = g.at(Sq::new(2, 2));
 
         // Two diagonals (28) beat four orthogonals (40).
-        assert_eq!(g.path(a, b, &m).unwrap().cost, 28);
+        assert_eq!(g.path(a, b, &m).unwrap().cost(), 28);
         assert_eq!(m.min_step(), 10);
     }
 
     #[test]
     fn a_one_way_ledge_can_be_dropped_off_but_not_climbed() {
         let g = FullGrid::square(1, 3, Adjacency::Four);
-        let top = g.index_of(Sq::new(0, 0)).unwrap();
-        let bottom = g.index_of(Sq::new(0, 2)).unwrap();
+        let top = g.at(Sq::new(0, 0));
+        let bottom = g.at(Sq::new(0, 2));
 
         // You may only ever travel south.
         let m = Movement::scan(&g, |s| (s.dir == Dir8::S).then_some(10));
 
-        assert_eq!(g.path(top, bottom, &m).unwrap().cost, 20, "down is fine");
+        assert_eq!(g.path(top, bottom, &m).unwrap().cost(), 20, "down is fine");
         assert!(g.path(bottom, top, &m).is_none(), "up is not");
     }
 }

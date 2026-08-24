@@ -11,7 +11,7 @@
 //! let g = FullGrid::square(8, 8, Adjacency::Four);
 //! let mut mud = CellMap::new(&g, false);
 //!
-//! mud[g.index_of(Sq::new(3, 3)).unwrap()] = true;
+//! mud[g.at(Sq::new(3, 3))] = true;
 //! assert_eq!(mud.iter().filter(|&(_, &m)| m).count(), 1);
 //! ```
 //!
@@ -24,7 +24,7 @@ use std::ops::{Index, IndexMut};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::coord::Idx;
+use crate::coord::{Idx, Tag};
 use crate::grid::Grid;
 
 /// One `T` for every cell of a grid, addressed by [`Idx`].
@@ -54,6 +54,14 @@ use crate::grid::Grid;
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CellMap<T> {
     of: Vec<T>,
+    /// The board this map was sized from, so a debug build catches a map subscripted with another
+    /// board's index — the case a bounds check cannot see, because the index is in range for both.
+    ///
+    /// `None` after a round trip through serde, where the check is deliberately dropped rather than
+    /// guessed at: a map is saved beside the cells that fix its order, and it is those cells that
+    /// make it line up with the grid rebuilt from them. See `tests/save.rs`.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    tag: Option<Tag>,
 }
 
 impl<T> CellMap<T> {
@@ -67,6 +75,7 @@ impl<T> CellMap<T> {
     {
         Self {
             of: vec![value; g.len()],
+            tag: Some(g.tag()),
         }
     }
 
@@ -89,12 +98,23 @@ impl<T> CellMap<T> {
     pub fn from_fn<B: Grid + ?Sized>(g: &B, f: impl Fn(B::Cell) -> T) -> Self {
         Self {
             of: g.cells().map(f).collect(),
+            tag: Some(g.tag()),
         }
     }
 
     /// Every cell and its value, in index order.
+    ///
+    /// The indices are the ones the grid this map was built from would issue. After a round trip
+    /// through serde there is no grid to name, so they carry no board and every check on them
+    /// passes — which is the same rule as [`CellMap`]'s own: the cells you saved beside it are
+    /// what make it line up again.
     pub fn iter(&self) -> impl Iterator<Item = (Idx, &T)> {
-        self.of.iter().enumerate().map(|(i, v)| (i as Idx, v))
+        let tag = self.tag.unwrap_or(Tag::ANY);
+        #[allow(clippy::cast_possible_truncation)]
+        self.of
+            .iter()
+            .enumerate()
+            .map(move |(i, v)| (Idx::new(tag, i as u32), v))
     }
 
     /// How many cells the map covers — the [`Grid::len`] it was built from.
@@ -109,16 +129,26 @@ impl<T> CellMap<T> {
         self.of.is_empty()
     }
 
-    /// Panics with something readable if `i` is past the end of this map.
+    /// Panics with something readable if `i` does not address this map.
+    ///
+    /// Two failures. Past the end is the obvious one. Issued by a different board is the one that
+    /// used to slip through whenever the two boards were the same size — a `CellMap` of one
+    /// board's terrain, read with another board's index, in range and wrong.
     #[track_caller]
     fn slot(&self, i: Idx) -> usize {
+        debug_assert!(
+            self.tag.is_none_or(|t| t.agrees(i.tag())),
+            "cell {i} was issued by a different grid than the one this CellMap was built from \
+             (a map is positional, and this index is in range for both, so nothing else can \
+             catch it)",
+        );
         assert!(
-            (i as usize) < self.of.len(),
+            (i.raw() as usize) < self.of.len(),
             "cell {i} is not in this CellMap, which covers {} cells (a map is positional, so \
              one built before `filtered` renumbered will not do)",
             self.of.len(),
         );
-        i as usize
+        i.raw() as usize
     }
 }
 
@@ -171,7 +201,7 @@ mod tests {
         let map = CellMap::new(&full.filtered(|c| c.x != 2), 0u8);
 
         assert_eq!(map.len(), 6);
-        let stale = full.index_of(Sq::new(2, 2)).unwrap();
+        let stale = full.at(Sq::new(2, 2));
         assert!(std::panic::catch_unwind(|| map[stale]).is_err());
     }
 }

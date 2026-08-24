@@ -49,31 +49,30 @@ fn directions_round_trip() {
 }
 
 #[test]
-fn a_saved_index_silently_points_at_the_wrong_cell_after_filtering() {
-    // THE hazard, made executable. This is what the docs warn about, and it is worth watching happen.
+fn a_saved_index_from_before_a_filter_is_caught() {
+    // THE hazard, made executable — and no longer silent.
     let full = FullGrid::square(3, 3, Adjacency::Four);
 
     // Our hero stands in the middle. We save his index, like a fool.
-    let hero = full.index_of(Sq::new(1, 1)).unwrap();
-    assert_eq!(hero, 4);
+    let hero = full.at(Sq::new(1, 1));
+    assert_eq!(hero.get(), 4);
 
     // The map changes — a cell is destroyed, flooded, whatever — and the grid is rebuilt.
     let after = full.filtered(|c| c != Sq::new(0, 0));
 
-    // Index 4 is still a perfectly valid index. It simply means something else now. There is no
-    // panic and no error, because there is nothing wrong with it: it is a number, and it is in
-    // range. Our hero has quietly moved one square east, and the first anyone will know is when a
-    // player says the save file is haunted.
-    assert_eq!(
-        after.coord(hero),
-        Sq::new(2, 1),
-        "index 4 is a DIFFERENT cell now"
-    );
-    assert_ne!(
-        after.coord(hero),
-        Sq::new(1, 1),
-        "he has silently teleported"
-    );
+    // Index 4 is still a number in range, so no bound can object. What objects is the index
+    // itself: it remembers which board numbered it, and `after` is not that board.
+    if cfg!(debug_assertions) {
+        let boom = std::panic::catch_unwind(|| after.coord(hero));
+        let msg = *boom.unwrap_err().downcast::<String>().unwrap();
+        assert!(msg.contains("different grid"), "{msg}");
+    } else {
+        // Shipped, the tag is gone and index 4 is simply index 4 — our hero has quietly moved one
+        // square east, and the first anyone knows is a player saying the save file is haunted.
+        // This is why the rule is *serialize coordinates*: the check is a development aid, not a
+        // guarantee to lean on at runtime.
+        assert_eq!(after.coord(hero), Sq::new(2, 1));
+    }
 }
 
 #[test]
@@ -81,15 +80,18 @@ fn an_out_of_range_stale_index_at_least_gets_caught() {
     // The other half, and the only half the crate *can* catch. If the board shrank past your stale
     // index, it is no longer a number in range, and `assert_cell` says so by name.
     //
-    // Worth being clear about what this does and does not buy you: it catches the stale index that
-    // fell off the end. It cannot catch the stale index above, which is still in range and simply
-    // wrong. Half a guard is not a guard — save coordinates.
+    // This is the half that is caught in **every** profile, tag or no tag: the board shrank past
+    // the stale index, so it is no longer a number in range. The test above covers the other half.
     let full = FullGrid::square(3, 3, Adjacency::Four);
-    let corner = full.index_of(Sq::new(2, 2)).unwrap(); // 8, the last cell
+    let corner = full.at(Sq::new(2, 2)); // 8, the last cell
     let after = full.filtered(|c| c != Sq::new(0, 0)); // now only 8 cells: 0..=7
 
     let boom = std::panic::catch_unwind(|| after.coord(corner));
     let msg = *boom.unwrap_err().downcast::<String>().unwrap();
+    if cfg!(debug_assertions) {
+        assert!(msg.contains("different grid"), "{msg}");
+        return;
+    }
     assert!(msg.contains("not on this grid"), "{msg}");
     assert!(
         msg.contains("filtered"),
@@ -103,7 +105,7 @@ fn a_saved_coordinate_survives_the_same_change() {
     // list. Look it up again on load.
     let full = FullGrid::square(3, 3, Adjacency::Four);
 
-    let hero = full.index_of(Sq::new(2, 2)).unwrap();
+    let hero = full.at(Sq::new(2, 2));
     let saved = serde_json::to_string(&full.coord(hero)).unwrap();
 
     let after = full.filtered(|c| c != Sq::new(0, 0));
@@ -128,7 +130,7 @@ fn a_coordinate_that_no_longer_exists_says_so() {
     // lookup returns None and the game can decide what to do. A stale index would have silently
     // handed back whichever cell inherited that slot.
     let full = FullGrid::square(3, 3, Adjacency::Four);
-    let doomed = full.coord(full.index_of(Sq::new(0, 0)).unwrap());
+    let doomed = full.coord(full.at(Sq::new(0, 0)));
 
     let after = full.filtered(|c| c != Sq::new(0, 0));
 
@@ -263,8 +265,8 @@ fn a_whole_game_state_round_trips_through_coordinates() {
     let walls = after.walls.clone();
     let m = Movement::scan(&g, |s| (!walls.contains(&g.coord(s.to))).then_some(10));
 
-    let from = g.index_of(after.units[0].0).unwrap();
-    let to = g.index_of(after.units[1].0).unwrap();
+    let from = g.at(after.units[0].0);
+    let to = g.at(after.units[1].0);
     assert!(
         g.path(from, to, &m).is_some(),
         "the loaded game still plays"

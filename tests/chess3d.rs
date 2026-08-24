@@ -176,20 +176,17 @@ fn the_board_is_three_layers_of_sixty_four() {
 #[test]
 fn a_rook_slides_its_rank_its_file_and_its_column() {
     let g = board();
-    let from = g.index_of(Cell3::new(0, 0, 0)).unwrap();
+    let from = g.at(Cell3::new(0, 0, 0));
     let empty = |_| false;
 
     let reach = slide(&g, from, &Dir3::ROOK, &empty);
 
     // From a corner of the bottom layer: 7 east, 7 south, and 2 straight up through the layers.
     assert_eq!(reach.len(), 16);
-    assert!(reach.contains(&g.index_of(Cell3::new(7, 0, 0)).unwrap()));
+    assert!(reach.contains(&g.at(Cell3::new(7, 0, 0))));
+    assert!(reach.contains(&g.at(Cell3::new(0, 0, 2))), "up two layers");
     assert!(
-        reach.contains(&g.index_of(Cell3::new(0, 0, 2)).unwrap()),
-        "up two layers"
-    );
-    assert!(
-        !reach.contains(&g.index_of(Cell3::new(1, 1, 0)).unwrap()),
+        !reach.contains(&g.at(Cell3::new(1, 1, 0))),
         "not a diagonal"
     );
 }
@@ -197,14 +194,14 @@ fn a_rook_slides_its_rank_its_file_and_its_column() {
 #[test]
 fn a_rook_takes_the_first_piece_in_its_way_and_stops() {
     let g = board();
-    let from = g.index_of(Cell3::new(0, 0, 0)).unwrap();
-    let blocker = g.index_of(Cell3::new(3, 0, 0)).unwrap();
+    let from = g.at(Cell3::new(0, 0, 0));
+    let blocker = g.at(Cell3::new(3, 0, 0));
 
     let reach = slide(&g, from, &Dir3::ROOK, &|i| i == blocker);
 
     assert!(reach.contains(&blocker), "it may take the blocker");
     assert!(
-        !reach.contains(&g.index_of(Cell3::new(4, 0, 0)).unwrap()),
+        !reach.contains(&g.at(Cell3::new(4, 0, 0))),
         "but it may not slide through him"
     );
 }
@@ -214,20 +211,17 @@ fn a_rook_cannot_slide_through_a_hole_in_the_board() {
     // Star-Trek-style boards are not solid cuboids. A missing cell stops a slide dead, and the
     // ray does that on its own — the piece never learns the board has a shape.
     let g = board().filtered(|c| c != Cell3::new(3, 0, 0));
-    let from = g.index_of(Cell3::new(0, 0, 0)).unwrap();
+    let from = g.at(Cell3::new(0, 0, 0));
 
     let reach = slide(&g, from, &Dir3::ROOK, &|_| false);
-    assert!(!reach.contains(&g.index_of(Cell3::new(4, 0, 0)).unwrap()));
-    assert!(
-        reach.contains(&g.index_of(Cell3::new(2, 0, 0)).unwrap()),
-        "up to the gap"
-    );
+    assert!(!reach.contains(&g.at(Cell3::new(4, 0, 0))));
+    assert!(reach.contains(&g.at(Cell3::new(2, 0, 0))), "up to the gap");
 }
 
 #[test]
 fn a_bishop_stays_on_its_diagonals() {
     let g = board();
-    let from = g.index_of(Cell3::new(0, 0, 1)).unwrap();
+    let from = g.at(Cell3::new(0, 0, 1));
 
     let reach = slide(&g, from, &Dir3::BISHOP, &|_| false);
     assert_eq!(reach.len(), 7, "the long diagonal of the middle layer");
@@ -240,7 +234,7 @@ fn a_bishop_stays_on_its_diagonals() {
 #[test]
 fn a_knight_leaps_over_whatever_is_in_the_way() {
     let g = board();
-    let from = g.index_of(Cell3::new(1, 0, 0)).unwrap();
+    let from = g.at(Cell3::new(1, 0, 0));
 
     // Its own back rank is packed solid; it leaps anyway, because an offset is a hop and not a walk.
     let leaps: Vec<Cell3> = knight(&g, from).iter().map(|&i| g.coord(i)).collect();
@@ -258,14 +252,14 @@ fn a_knight_leaps_over_whatever_is_in_the_way() {
 #[test]
 fn a_knight_in_the_middle_has_all_eight() {
     let g = board();
-    let from = g.index_of(Cell3::new(4, 4, 1)).unwrap();
+    let from = g.at(Cell3::new(4, 4, 1));
     assert_eq!(knight(&g, from).len(), 8);
 }
 
 #[test]
 fn a_piece_can_change_layer() {
     let g = board();
-    let from = g.index_of(Cell3::new(4, 4, 0)).unwrap();
+    let from = g.at(Cell3::new(4, 4, 0));
 
     let up = g.step(from, Dir3::Up).unwrap();
     assert_eq!(g.coord(up), Cell3::new(4, 4, 1));
@@ -284,8 +278,8 @@ fn pathfinding_still_works_on_a_board_it_was_never_designed_for() {
     let g = board();
     let m = Movement::scan(&g, |_| Some(10));
 
-    let from = g.index_of(Cell3::new(0, 0, 0)).unwrap();
-    let to = g.index_of(Cell3::new(7, 7, 2)).unwrap();
+    let from = g.at(Cell3::new(0, 0, 0));
+    let to = g.at(Cell3::new(7, 7, 2));
 
     // The true cheapest route is nine steps: this board has no move that crosses *and* changes
     // layer at once, so it is seven diagonals within a layer plus two rungs up.
@@ -307,8 +301,8 @@ fn a_loose_metric_is_still_a_correct_one() {
     use spacewalk::{Movement, Step};
 
     let g = board();
-    let from = g.index_of(Cell3::new(0, 0, 0)).unwrap();
-    let to = g.index_of(Cell3::new(7, 7, 2)).unwrap();
+    let from = g.at(Cell3::new(0, 0, 0));
+    let to = g.at(Cell3::new(7, 7, 2));
 
     assert!(
         g.distance(from, to) <= 9,
@@ -317,7 +311,7 @@ fn a_loose_metric_is_still_a_correct_one() {
 
     // And the proof it did not cost us correctness: A* agrees with Dijkstra.
     let enter = |_: Step<Cell3>| Some(10);
-    let astar = g.path(from, to, &Movement::scan(&g, enter)).unwrap().cost;
-    let dijkstra = g.path(from, to, &Movement::new(enter, 0)).unwrap().cost;
+    let astar = g.path(from, to, &Movement::scan(&g, enter)).unwrap().cost();
+    let dijkstra = g.path(from, to, &Movement::new(enter, 0)).unwrap().cost();
     assert_eq!(astar, dijkstra);
 }

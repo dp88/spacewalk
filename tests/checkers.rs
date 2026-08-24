@@ -57,13 +57,13 @@ fn moves(g: &FullGrid<Sq>, at: &[Option<Piece>], from: Idx, piece: Piece) -> (Ve
         let Some(next) = g.step(from, d) else {
             continue;
         };
-        match at[next as usize] {
+        match at[next.get() as usize] {
             None => steps.push(next),
             Some(p) if p.side() != piece.side() => {
                 // An enemy: jump it, if the cell straight beyond is empty. Two steps in the SAME
                 // direction — which is only expressible because the step keeps its direction.
                 if let Some(land) = g.step(next, d)
-                    && at[land as usize].is_none()
+                    && at[land.get() as usize].is_none()
                 {
                     jumps.push(land);
                 }
@@ -85,7 +85,7 @@ fn only_the_dark_squares_are_on_the_board() {
 #[test]
 fn the_orthogonals_lead_nowhere_so_the_diagonals_are_the_whole_adjacency() {
     let g = board();
-    let mid = g.index_of(Sq::new(3, 4)).unwrap();
+    let mid = g.at(Sq::new(3, 4));
 
     assert_eq!(g.neighbors(mid).count(), 4);
     for (d, _) in g.neighbors(mid) {
@@ -98,7 +98,7 @@ fn the_orthogonals_lead_nowhere_so_the_diagonals_are_the_whole_adjacency() {
 fn a_man_may_only_advance() {
     let g = board();
     let at = vec![None; g.len()];
-    let from = g.index_of(Sq::new(3, 4)).unwrap();
+    let from = g.at(Sq::new(3, 4));
 
     let (steps, _) = moves(&g, &at, from, Piece::Man(Side::Red));
     let cells: Vec<Sq> = steps.iter().map(|&i| g.coord(i)).collect();
@@ -114,7 +114,7 @@ fn a_man_may_only_advance() {
 fn a_king_may_go_any_way() {
     let g = board();
     let at = vec![None; g.len()];
-    let from = g.index_of(Sq::new(3, 4)).unwrap();
+    let from = g.at(Sq::new(3, 4));
 
     let (steps, _) = moves(&g, &at, from, Piece::King(Side::Red));
     assert_eq!(steps.len(), 4, "all four diagonals");
@@ -125,9 +125,9 @@ fn a_man_jumps_an_enemy_and_lands_beyond_it() {
     let g = board();
     let mut at = vec![None; g.len()];
 
-    let from = g.index_of(Sq::new(3, 4)).unwrap();
-    let victim = g.index_of(Sq::new(4, 3)).unwrap(); // north-east of us
-    at[victim as usize] = Some(Piece::Man(Side::Black));
+    let from = g.at(Sq::new(3, 4));
+    let victim = g.at(Sq::new(4, 3)); // north-east of us
+    at[victim.get() as usize] = Some(Piece::Man(Side::Black));
 
     let (steps, jumps) = moves(&g, &at, from, Piece::Man(Side::Red));
 
@@ -148,9 +148,9 @@ fn a_jump_is_blocked_when_the_landing_square_is_taken() {
     let g = board();
     let mut at = vec![None; g.len()];
 
-    let from = g.index_of(Sq::new(3, 4)).unwrap();
-    at[g.index_of(Sq::new(4, 3)).unwrap() as usize] = Some(Piece::Man(Side::Black));
-    at[g.index_of(Sq::new(5, 2)).unwrap() as usize] = Some(Piece::Man(Side::Black));
+    let from = g.at(Sq::new(3, 4));
+    at[g.at(Sq::new(4, 3)).get() as usize] = Some(Piece::Man(Side::Black));
+    at[g.at(Sq::new(5, 2)).get() as usize] = Some(Piece::Man(Side::Black));
 
     let (_, jumps) = moves(&g, &at, from, Piece::Man(Side::Red));
     assert!(jumps.is_empty(), "nowhere to land");
@@ -161,8 +161,8 @@ fn we_never_jump_our_own() {
     let g = board();
     let mut at = vec![None; g.len()];
 
-    let from = g.index_of(Sq::new(3, 4)).unwrap();
-    at[g.index_of(Sq::new(4, 3)).unwrap() as usize] = Some(Piece::Man(Side::Red));
+    let from = g.at(Sq::new(3, 4));
+    at[g.at(Sq::new(4, 3)).get() as usize] = Some(Piece::Man(Side::Red));
 
     let (steps, jumps) = moves(&g, &at, from, Piece::Man(Side::Red));
     assert!(jumps.is_empty(), "a friend is not a victim");
@@ -176,11 +176,11 @@ fn a_double_jump_chains_by_asking_again_from_where_it_landed() {
     let g = board();
     let mut at = vec![None; g.len()];
 
-    let from = g.index_of(Sq::new(1, 6)).unwrap();
-    let first = g.index_of(Sq::new(2, 5)).unwrap();
-    let second = g.index_of(Sq::new(4, 3)).unwrap();
-    at[first as usize] = Some(Piece::Man(Side::Black));
-    at[second as usize] = Some(Piece::Man(Side::Black));
+    let from = g.at(Sq::new(1, 6));
+    let first = g.at(Sq::new(2, 5));
+    let second = g.at(Sq::new(4, 3));
+    at[first.get() as usize] = Some(Piece::Man(Side::Black));
+    at[second.get() as usize] = Some(Piece::Man(Side::Black));
 
     let red = Piece::Man(Side::Red);
 
@@ -188,7 +188,7 @@ fn a_double_jump_chains_by_asking_again_from_where_it_landed() {
     assert_eq!(g.coord(jumps[0]), Sq::new(3, 4), "over the first");
 
     // Take him off the board, and ask again from where we landed.
-    at[first as usize] = None;
+    at[first.get() as usize] = None;
     let (_, again) = moves(&g, &at, jumps[0], red);
     assert_eq!(
         g.coord(again[0]),
@@ -200,6 +200,6 @@ fn a_double_jump_chains_by_asking_again_from_where_it_landed() {
 #[test]
 fn a_man_promotes_on_the_far_rank() {
     let g = board();
-    let landed = g.index_of(Sq::new(5, 0)).unwrap();
+    let landed = g.at(Sq::new(5, 0));
     assert_eq!(g.coord(landed).y, 0, "red's back rank");
 }

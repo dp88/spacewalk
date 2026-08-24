@@ -51,8 +51,8 @@ pub enum CornerRule {
 /// let strict = corner_gate(&g, CornerRule::Strict, open);
 /// let free   = corner_gate(&g, CornerRule::Free,   open);
 ///
-/// let from = g.index_of(Sq::new(0, 0)).unwrap();
-/// let to   = g.index_of(Sq::new(1, 1)).unwrap();
+/// let from = g.at(Sq::new(0, 0));
+/// let to   = g.at(Sq::new(1, 1));
 ///
 /// let strict_walk = Movement::scan(&g, |s| (open(s.to) && strict(s)).then_some(10));
 /// let free_walk   = Movement::scan(&g, |s| (open(s.to) && free(s)).then_some(10));
@@ -97,8 +97,8 @@ mod tests {
         let gate = corner_gate(&g, rule, open);
         let m = Movement::scan(&g, |s| (open(s.to) && gate(s)).then_some(10 as Cost));
 
-        let from = g.index_of(Sq::new(0, 0)).unwrap();
-        let to = g.index_of(Sq::new(1, 1)).unwrap();
+        let from = g.at(Sq::new(0, 0));
+        let to = g.at(Sq::new(1, 1));
         g.path(from, to, &m).map(|p| p.len())
     }
 
@@ -144,7 +144,7 @@ mod tests {
     fn orthogonal_steps_never_have_a_corner_to_cut() {
         let g = FullGrid::square(3, 3, Adjacency::Four);
         let gate = corner_gate(&g, CornerRule::Strict, |_| false);
-        let from = g.index_of(Sq::new(1, 1)).unwrap();
+        let from = g.at(Sq::new(1, 1));
 
         // Even with every flank refused, the four orthogonals pass — they have no flanks.
         for (dir, to) in g.neighbors(from) {

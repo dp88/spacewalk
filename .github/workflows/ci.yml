@@ -30,7 +30,12 @@ jobs:
       - run: cargo test --all-features --doc
       # robust's bugs hide behind debug's overflow checks, and range_cost times the build a game
       # ships. Both must run against the optimized profile or they test nothing.
+      #
+      # The release run carries a second job now: an index's board tag is a debug_assert, so this
+      # is the profile where it is gone. Every answer must be identical either way — only whether
+      # a mistake is reported may differ. `tests/identity.rs` states which is which.
       - run: cargo test --release --all-features --all-targets
+      - run: cargo test --release --all-features --doc
 
   lint:
     name: Format and lint

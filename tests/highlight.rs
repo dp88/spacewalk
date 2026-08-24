@@ -61,7 +61,7 @@ fn a_movement_range_is_a_board_a_route_cannot_leave() {
     // route must stay in the shading — a path that leaves the highlight and comes back is a path
     // the player was never shown and cannot afford.
     let (g, terrain) = field();
-    let unit = g.index_of(Sq::new(2, 5)).unwrap();
+    let unit = g.at(Sq::new(2, 5));
 
     let budget = 40;
     let reach = g.reachable(unit, budget, &march(&g, &terrain));
@@ -73,7 +73,7 @@ fn a_movement_range_is_a_board_a_route_cannot_leave() {
     );
 
     // Inside the highlight, the unit is at index whatever-this-board-says. Ask again by coordinate.
-    let from = range.index_of(Sq::new(2, 5)).unwrap();
+    let from = range.at(Sq::new(2, 5));
     let far = range
         .indices()
         .max_by_key(|&i| range.distance(from, i))
@@ -81,10 +81,10 @@ fn a_movement_range_is_a_board_a_route_cannot_leave() {
 
     let route = range.path(from, far, &march(&range, &terrain)).unwrap();
     assert!(
-        route.cost <= budget,
+        route.cost() <= budget,
         "the shading promised this was affordable"
     );
-    for &i in &route.steps {
+    for &i in route.steps() {
         assert!(
             reach.iter().any(|&(r, _)| r == range.to_root(i)),
             "{:?} was walked through but never shaded",
@@ -99,7 +99,7 @@ fn a_region_reads_the_games_own_data_through_the_root() {
     // `blast` numbers its own three-by-three afresh. Subscripting one with the other's index is
     // the mistake, and `to_root` is the whole of the fix.
     let (g, terrain) = field();
-    let centre = g.index_of(Sq::new(6, 4)).unwrap();
+    let centre = g.at(Sq::new(6, 4));
     let blast = g.within(centre, 0, 1);
 
     assert_eq!(
@@ -117,7 +117,7 @@ fn a_region_reads_the_games_own_data_through_the_root() {
 
     // And the other way: a cell the game already has a root index for, located in the region.
     assert_eq!(blast.of_root(centre), blast.index_of(Sq::new(6, 4)));
-    assert_eq!(blast.of_root(g.index_of(Sq::new(0, 0)).unwrap()), None);
+    assert_eq!(blast.of_root(g.at(Sq::new(0, 0))), None);
 }
 
 #[test]
@@ -126,15 +126,15 @@ fn an_area_of_effect_is_split_by_a_wall_that_runs_through_it() {
     // wall covers cells on both sides, and the two sides are not one area. Answering it means
     // asking a *component* question about the highlight itself.
     let (g, terrain) = field();
-    let centre = g.index_of(Sq::new(6, 1)).unwrap();
+    let centre = g.at(Sq::new(6, 1));
 
     let blast = g.within(centre, 0, 2);
     let open = |i: Idx| terrain[blast.to_root(i)] != Terrain::Wall;
 
     assert!(!blast.is_connected(open), "the wall runs through the blast");
 
-    let west = blast.component(blast.index_of(Sq::new(4, 1)).unwrap(), open);
-    let east = blast.component(blast.index_of(Sq::new(8, 1)).unwrap(), open);
+    let west = blast.component(blast.at(Sq::new(4, 1)), open);
+    let east = blast.component(blast.at(Sq::new(8, 1)), open);
     assert!(
         west.cells().all(|c| !east.contains(c)),
         "two separate areas"
@@ -146,10 +146,13 @@ fn a_region_of_a_region_still_maps_back_to_the_board_in_one_hop() {
     // Narrowing a highlight — the reachable cells that are also in sight, say — must not build a
     // chain of boards to walk back down. A subset of a subset is a subset of the board.
     let (g, terrain) = field();
-    let eye = g.index_of(Sq::new(2, 5)).unwrap();
+    let eye = g.at(Sq::new(2, 5));
 
     let seen = g.visible_from(eye, 4, |i| terrain[i] == Terrain::Wall);
-    let near = seen.subset(seen.indices().filter(|&i| seen.distance(0, i) <= 2));
+    let near = seen.subset(
+        seen.indices()
+            .filter(|&i| seen.distance(seen.at(Sq::new(2, 5)), i) <= 2),
+    );
 
     assert!(near.len() < seen.len());
     for i in near.indices() {
@@ -164,7 +167,7 @@ fn sight_stops_at_the_wall_but_range_does_not() {
     // coordinates, so it reaches past a wall — that is what lets an archer shoot over one.
     // `visible_from` walks the line, so it does not.
     let (g, terrain) = field();
-    let eye = g.index_of(Sq::new(4, 5)).unwrap();
+    let eye = g.at(Sq::new(4, 5));
     let blocked = |i: Idx| terrain[i] == Terrain::Wall;
 
     let range = g.within(eye, 0, 4);
@@ -177,12 +180,6 @@ fn sight_stops_at_the_wall_but_range_does_not() {
     assert!(!sight.contains(Sq::new(7, 4)), "and the wall hides it");
 
     // Both are boards over the same cells, so the metric agrees with the root's.
-    let (a, b) = (
-        range.index_of(Sq::new(4, 5)).unwrap(),
-        range.index_of(Sq::new(4, 1)).unwrap(),
-    );
-    assert_eq!(
-        range.distance(a, b),
-        g.distance(eye, g.index_of(Sq::new(4, 1)).unwrap())
-    );
+    let (a, b) = (range.at(Sq::new(4, 5)), range.at(Sq::new(4, 1)));
+    assert_eq!(range.distance(a, b), g.distance(eye, g.at(Sq::new(4, 1))));
 }

@@ -22,8 +22,8 @@
 //!     Some(if mud.contains(&g.coord(s.to)) { 30 } else { 10 })
 //! });
 //!
-//! let from = g.index_of(Sq::new(0, 0)).unwrap();
-//! let to   = g.index_of(Sq::new(7, 7)).unwrap();
+//! let from = g.at(Sq::new(0, 0));
+//! let to   = g.at(Sq::new(7, 7));
 //! assert_eq!(g.path(from, to, &walk).unwrap().len(), 14);
 //! ```
 //!
@@ -34,6 +34,10 @@
 //! When "whatever shape suits you" is simply one value per cell, [`CellMap`] is that `Vec`, sized
 //! from the board and subscripted by an [`Idx`] rather than by a hand-written cast. It holds no
 //! grid, so the two objects above stay two objects.
+//!
+//! Indices go in; coordinates come back out with [`Grid::coords_of`], which is what you draw and
+//! what you save. [`Grid::at`] is the way in for a cell you already know is on the board, and
+//! [`Grid::index_of`] the way in when being off it is an answer rather than a mistake.
 //!
 //! # Cost is what it costs to enter a cell, from a direction
 //!
@@ -72,7 +76,7 @@
 //! use spacewalk::{Adjacency, FullGrid, Grid, Sq};
 //!
 //! let g = FullGrid::square(16, 16, Adjacency::Eight);
-//! let eye = g.index_of(Sq::new(8, 8)).unwrap();
+//! let eye = g.at(Sq::new(8, 8));
 //! let wall = |i| g.coord(i).x == 10;
 //!
 //! let seen = g.visible_from(eye, 5, wall);       // a board of what this unit can see
@@ -113,15 +117,43 @@
 //!
 //! # Two things to know before you build one
 //!
-//! **Indices are not addresses.** [`Idx`] is a dense `u32`, valid only within the board that issued
+//! **Indices are not addresses.** [`Idx`] is a dense index, valid only within the board that issued
 //! it. Two boards with the same cells may number them differently; [`FullGrid::filtered`] renumbers,
 //! and a [`SubGrid`] numbers its own cells from zero. *Serialize coordinates, never indices.*
 //!
 //! A subset makes this sharper than a filter does, because both numberings stay **live**: the
-//! region's index 0 and the board's index 0 are each valid and each a different cell. Nothing can
-//! catch that at runtime — every index is in range for one of them. [`Grid::to_root`] and
+//! region's index 0 and the board's index 0 are each valid and each a different cell. No bounds
+//! check can separate them — every index is in range for one of them. [`Grid::to_root`] and
 //! [`Grid::of_root`] are the bridge, and the only correct one. See [`SubGrid`] for the two ways it
 //! bites.
+//!
+//! So an index carries the board that issued it, and a **debug build checks it**:
+//!
+//! ```
+//! use spacewalk::{Adjacency, FullGrid, Grid, Sq};
+//!
+//! let board = FullGrid::square(8, 8, Adjacency::Four);
+//! let dark = board.filtered(|c| (c.x + c.y) % 2 == 0);
+//! let light = board.filtered(|c| (c.x + c.y) % 2 == 1);
+//! assert_eq!(dark.len(), light.len(), "so no bound can tell them apart");
+//!
+//! let cell = dark.at(Sq::new(2, 2));
+//! assert_eq!(dark.coord(cell), Sq::new(2, 2));
+//!
+//! // `light.coord(cell)` is index 9 either way — a real cell of both boards, and a different one.
+//! // In a debug build it panics: "issued by a different grid". Shipped, it quietly answers
+//! // Sq::new(3, 2), which is why the rule below is still the rule.
+//! ```
+//!
+//! That is a [`Tag`], and in release it is zero-sized: the checks vanish and an `Idx` is a bare
+//! `u32` again. Equality, ordering, and hashing compare the number alone in both profiles, so
+//! nothing you observe changes with the build — only whether the mistake is reported. Treat it as
+//! it is meant: a development aid, not a runtime guarantee. The rule is still *serialize
+//! coordinates*.
+//!
+//! Two boards that number the same cells the same way share a tag and are interchangeable, which
+//! is what makes rebuilding a board from [`Grid::cells`] restore the *same indices* rather than
+//! merely an equivalent board.
 //!
 //! **The metric must agree with the adjacency.** An eight-way board measured with Manhattan
 //! distance is the classic tactics bug: a unit can *step* to the enemy diagonally beside it, but
@@ -136,6 +168,11 @@
 //!   [`Metric`] are deliberately not serializable: a grid is rebuilt from its cells, and a metric
 //!   holds function pointers. `tests/save.rs` shows what to persist instead — coordinates, never
 //!   indices, and a `CellMap` only alongside the cells that fix its order.
+//!
+//! # Where to start
+//!
+//! [`prelude`] imports the names above in one line. [`Grid`] is where the vocabulary lives, and its
+//! own documentation says which questions hand back an iterator, which a board, and which a `Vec`.
 
 #![deny(missing_docs)]
 
@@ -155,10 +192,31 @@ pub mod square;
 pub mod sub;
 
 pub use cells::CellMap;
-pub use coord::{Coord, Dir6, Dir8, Hex, Idx, Lerp, Metric, Sq};
+pub use coord::{Coord, Dir6, Dir8, Hex, Idx, Lerp, Metric, Sq, Tag};
 pub use full::{Adjacency, FullGrid, MAX_CELLS};
 pub use grid::{Dir, Grid, MAX_SIGHT};
 pub use layout::{HexLayout, Offset, Orientation, Pt, SqLayout};
 pub use path::{Cost, Movement, Path, Step};
 pub use rect::RectGrid;
+pub use square::{CornerRule, corner_gate};
 pub use sub::SubGrid;
+
+/// Everything you need to build a board and ask it something.
+///
+/// [`Grid`] is a trait, so it must be in scope for any of its thirty-odd methods to be callable —
+/// which is the one import nobody guesses. This is that, plus the handful of names that come with
+/// it.
+///
+/// ```
+/// use spacewalk::prelude::*;
+///
+/// let g = FullGrid::square(8, 8, Adjacency::Four);
+/// let walk = Movement::uniform(&g, 1);
+/// assert_eq!(g.path(g.at(Sq::new(0, 0)), g.at(Sq::new(7, 7)), &walk).unwrap().len(), 14);
+/// ```
+pub mod prelude {
+    pub use crate::{
+        Adjacency, CellMap, Coord, Cost, Dir6, Dir8, FullGrid, Grid, Hex, HexLayout, Idx, Metric,
+        Movement, Offset, Orientation, Path, Pt, RectGrid, Sq, SqLayout, Step, SubGrid,
+    };
+}

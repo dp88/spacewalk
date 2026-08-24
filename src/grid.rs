@@ -9,7 +9,7 @@
 //! written in terms of the geometry primitives below and needs no storage of its own, which is why
 //! a region of a board can be a board without copying one.
 
-use crate::coord::{Coord, Idx, Metric};
+use crate::coord::{Coord, Idx, Metric, Tag};
 // The trait no longer names a `FullGrid`, but the documentation below links to one throughout.
 #[allow(unused_imports)]
 use crate::full::FullGrid;
@@ -34,17 +34,42 @@ pub const MAX_SIGHT: u32 = 64;
 /// thing that belongs behind a name.
 pub type Dir<B> = <<B as Grid>::Cell as Coord>::Dir;
 
-/// Panics with something readable if `i` is not a cell of a board `len` cells long.
+/// Check that `i` belongs to this board, and turn it into a slot in the board's own tables.
 ///
-/// Indices are dense and board-specific. Handing one board an index from another — or a stale one
-/// from before [`FullGrid::filtered`] or a [`SubGrid`] renumbered — would otherwise fault deep
-/// inside the step table with an internal message about a slice bound.
+/// Two failures, and the second is the one that used to get through. The bounds check catches an
+/// index past the end. The tag check catches an index that is *in* range but was issued by a
+/// different board — two boards of the same size, where no bound can tell them apart. That case
+/// was silent before, and `full.rs` called it the one way to get a wrong answer out of this crate
+/// without hearing about it.
+///
+/// The tag check is a `debug_assert`, so a shipped build pays nothing. See [`Tag`].
 #[track_caller]
-pub(crate) fn assert_cell(len: usize, i: Idx) {
+pub(crate) fn slot(len: usize, tag: Tag, i: Idx) -> usize {
+    debug_assert!(
+        i.tag().agrees(tag),
+        "cell {i} was issued by a different grid than the one being asked \
+         (indices are per-grid, and this one is in range for both, so nothing else can catch it). \
+         Look the cell up again with `Grid::index_of` or `Grid::at` on the grid you mean.",
+    );
     assert!(
-        (i as usize) < len,
+        (i.raw() as usize) < len,
         "cell {i} is not on this grid, which has {len} cells (indices are per-grid; \
          a stale one from before `filtered` or a subset renumbered will not do)",
+    );
+    i.raw() as usize
+}
+
+/// Check only that `i` came from this board, for the places where being off it is an answer.
+///
+/// [`Grid::of_root`] asks whether a cell is in a region and says `None` when it is not, so a bound
+/// is not a failure there. Coming from the wrong board still is.
+#[track_caller]
+pub(crate) fn same_grid(tag: Tag, i: Idx) {
+    debug_assert!(
+        i.tag().agrees(tag),
+        "cell {i} was issued by a different grid than the one being asked \
+         (indices are per-grid, and this one may well be in range for both). \
+         Look the cell up again with `Grid::index_of` or `Grid::at` on the grid you mean.",
     );
 }
 
@@ -77,6 +102,30 @@ pub(crate) fn cost_ceiling(len: usize) -> Cost {
 /// from zero, so its indices and its root's are **both valid and mutually wrong**. [`to_root`] and
 /// [`of_root`] are the bridge, and they are the only correct one.
 ///
+/// A debug build catches the mistake for you: an index carries a [`Tag`] naming its board, and
+/// every method here checks it. In release the tag is zero-sized and the checks are gone.
+///
+/// # What each question hands back
+///
+/// One rule, applied throughout. An **iterator** when the walk is lazy and the caller may stop
+/// early ([`indices`](Grid::indices), [`cells`](Grid::cells), [`ray`](Grid::ray)). A [`SubGrid`]
+/// when the answer *is* a board and you will go on to ask it things ([`within`](Grid::within),
+/// [`ring`](Grid::ring), [`component`](Grid::component), [`visible_from`](Grid::visible_from)). A
+/// `Vec` when the walk must finish before any of it is correct — [`run`](Grid::run) reads both ways
+/// from its anchor, [`line`](Grid::line) is built from both ends, and the searches must settle
+/// before a cost is final.
+///
+/// # This trait is not dyn compatible
+///
+/// [`neighbors`](Grid::neighbors) returns `impl Iterator`, so there is no `Box<dyn Grid>`. That is
+/// deliberate: a vtable here would put an allocation on the hottest loop in the crate, and every
+/// search walks neighbours.
+///
+/// Write generic code instead — `fn f<B: Grid>(g: &B, c: B::Cell)` reads no worse and costs
+/// nothing, and it takes a [`FullGrid`], a [`RectGrid`](crate::RectGrid), and a [`SubGrid`] alike.
+/// If you genuinely must choose a board shape at runtime, an `enum` over the two or three you
+/// actually ship is the answer, and it stays static.
+///
 /// [`to_root`]: Grid::to_root
 /// [`of_root`]: Grid::of_root
 pub trait Grid {
@@ -93,6 +142,13 @@ pub trait Grid {
 
     // -- required: the geometry primitives ---------------------------------------------------
 
+    /// This board's numbering, for checking the indices handed to it. See [`Tag`].
+    ///
+    /// Derive it from the cells in index order, with [`Tag::of`]. Two boards that number the same
+    /// cells the same way must agree, or an index that *should* travel between them will trip the
+    /// check.
+    fn tag(&self) -> Tag;
+
     /// How many cells the board has.
     fn len(&self) -> usize;
 
@@ -103,6 +159,8 @@ pub trait Grid {
     fn coord(&self, i: Idx) -> Self::Cell;
 
     /// The index of a coordinate, or `None` if it is not on the board.
+    ///
+    /// [`Grid::at`] is the same question when the cell is one you already know is there.
     fn index_of(&self, c: Self::Cell) -> Option<Idx>;
 
     /// The direction alphabet this board was built with.
@@ -136,8 +194,8 @@ pub trait Grid {
     /// use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Sq};
     ///
     /// let board = FullGrid::square(3, 3, Adjacency::Four);
-    /// let centre = board.index_of(Sq::new(1, 1)).unwrap();
-    /// let north = board.index_of(Sq::new(1, 0)).unwrap();
+    /// let centre = board.at(Sq::new(1, 1));
+    /// let north = board.at(Sq::new(1, 0));
     ///
     /// // The direction is the one the arriving piece travels: from the north, heading south.
     /// assert!(board.in_neighbors(centre).any(|(d, from)| from == north && d == Dir8::S));
@@ -176,9 +234,41 @@ pub trait Grid {
         self.len() == 0
     }
 
+    /// The index of a coordinate you already know is on the board.
+    ///
+    /// The same question as [`index_of`](Grid::index_of), for the common case where a `None` would
+    /// only ever be unwrapped. Most cells a game asks about came from the board in the first place —
+    /// a unit's position, a tile the map file named, the cell under the mouse *after* it was
+    /// checked — and `index_of(c).unwrap()` says nothing about which one went wrong when it does.
+    ///
+    /// Use [`index_of`](Grid::index_of) when off-board is an answer rather than a mistake.
+    ///
+    /// ```
+    /// use spacewalk::{Adjacency, FullGrid, Grid, Sq};
+    ///
+    /// let g = FullGrid::square(8, 8, Adjacency::Four);
+    /// assert_eq!(g.at(Sq::new(3, 3)), g.at(Sq::new(3, 3)));
+    /// ```
+    ///
+    /// # Panics
+    /// If `c` is not on this board, naming the coordinate.
+    #[track_caller]
+    fn at(&self, c: Self::Cell) -> Idx {
+        match self.index_of(c) {
+            Some(i) => i,
+            None => panic!(
+                "{c:?} is not a cell of this grid, which has {} (use `index_of` if being off the \
+                 board is an answer rather than a mistake)",
+                self.len(),
+            ),
+        }
+    }
+
     /// Every cell index, in order. The usual way to sweep a board.
     fn indices(&self) -> impl Iterator<Item = Idx> {
-        0..self.len() as Idx
+        let tag = self.tag();
+        #[allow(clippy::cast_possible_truncation)]
+        (0..self.len() as u32).map(move |i| Idx::new(tag, i))
     }
 
     /// Every cell's coordinate, in index order.
@@ -187,6 +277,29 @@ pub trait Grid {
     /// and you get the same board, with the same indices — see `tests/save.rs`.
     fn cells(&self) -> impl Iterator<Item = Self::Cell> {
         self.indices().map(|i| self.coord(i))
+    }
+
+    /// The coordinates of some indices, in the order given.
+    ///
+    /// Every answer this crate gives is in indices, and everything outside it — drawing, saving,
+    /// your own tables keyed by coordinate — wants cells. This is that step, for a path's steps, a
+    /// range query's results, or anything else you are holding.
+    ///
+    /// ```
+    /// use spacewalk::{Adjacency, FullGrid, Grid, Movement, Sq};
+    ///
+    /// let g = FullGrid::square(8, 8, Adjacency::Four);
+    /// let walk = Movement::uniform(&g, 1);
+    /// let path = g.path(g.at(Sq::new(0, 0)), g.at(Sq::new(2, 0)), &walk).unwrap();
+    ///
+    /// let route: Vec<Sq> = g.coords_of(path.steps().iter().copied()).collect();
+    /// assert_eq!(route, [Sq::new(0, 0), Sq::new(1, 0), Sq::new(2, 0)]);
+    /// ```
+    ///
+    /// # Panics
+    /// If any index is not a cell of this board.
+    fn coords_of(&self, of: impl IntoIterator<Item = Idx>) -> impl Iterator<Item = Self::Cell> {
+        of.into_iter().map(|i| self.coord(i))
     }
 
     /// Whether a coordinate is on the board.
@@ -218,7 +331,7 @@ pub trait Grid {
     /// let corner = g.subset(g.indices().filter(|&i| g.coord(i).x < 2 && g.coord(i).y < 2));
     ///
     /// assert_eq!(corner.len(), 4, "a 2x2 board in its own right");
-    /// let a = corner.index_of(Sq::new(0, 0)).unwrap();
+    /// let a = corner.at(Sq::new(0, 0));
     /// assert_eq!(corner.neighbors(a).count(), 2, "and its own edges");
     /// ```
     fn subset(&self, cells: impl IntoIterator<Item = Idx>) -> SubGrid<'_, Self::Root> {
@@ -236,7 +349,7 @@ pub trait Grid {
     /// use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Sq};
     ///
     /// let board = FullGrid::square(8, 8, Adjacency::Eight);
-    /// let a1 = board.index_of(Sq::new(0, 7)).unwrap();
+    /// let a1 = board.at(Sq::new(0, 7));
     ///
     /// // A rook on a1 slides up the file: a2..a8, seven squares.
     /// assert_eq!(board.ray(a1, Dir8::N).count(), 7);
@@ -250,7 +363,7 @@ pub trait Grid {
     ///
     /// If `i` is not a cell of this board.
     fn ray(&self, i: Idx, d: Dir<Self>) -> impl Iterator<Item = Idx> {
-        assert_cell(self.len(), i);
+        let _ = slot(self.len(), self.tag(), i);
 
         // Bounded by the board, deliberately. A straight line cannot visit more cells than exist,
         // so this changes no correct answer — but a `Coord` whose `step` wraps (a torus world is a
@@ -278,7 +391,7 @@ pub trait Grid {
     /// use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Sq};
     ///
     /// let g = FullGrid::square(9, 9, Adjacency::Eight);
-    /// let at = |x, y| g.index_of(Sq::new(x, y)).unwrap();
+    /// let at = |x, y| g.at(Sq::new(x, y));
     /// let mine = [Sq::new(2, 4), Sq::new(3, 4), Sq::new(5, 4), Sq::new(6, 4)];
     ///
     /// // Two pairs with a gap between them. Playing the gap would join them into five.
@@ -301,7 +414,7 @@ pub trait Grid {
     /// If `i` is not a cell of this board.
     #[must_use]
     fn run(&self, i: Idx, d: Dir<Self>, same: impl Fn(Idx) -> bool) -> Vec<Idx> {
-        assert_cell(self.len(), i);
+        let _ = slot(self.len(), self.tag(), i);
 
         // The reverse leg reads the in-edges rather than turning `d` around, which is what lets a
         // `Coord::Dir` get away with knowing nothing about its own opposite. Where several cells
@@ -336,7 +449,7 @@ pub trait Grid {
     /// use spacewalk::{Adjacency, FullGrid, Grid, Sq};
     ///
     /// let board = FullGrid::square(8, 8, Adjacency::Eight);
-    /// let b1 = board.index_of(Sq::new(1, 7)).unwrap();
+    /// let b1 = board.at(Sq::new(1, 7));
     ///
     /// // A knight on b1 leaps to a3 and c3, over its own back rank.
     /// let leaps: Vec<Sq> = [Sq::new(-1, -2), Sq::new(1, -2)]
@@ -352,7 +465,7 @@ pub trait Grid {
     /// If `i` is not a cell of this board.
     #[must_use]
     fn offset(&self, i: Idx, delta: Self::Cell) -> Option<Idx> {
-        assert_cell(self.len(), i);
+        let _ = slot(self.len(), self.tag(), i);
         self.index_of(self.coord(i) + delta)
     }
 
@@ -371,9 +484,9 @@ pub trait Grid {
     /// If `a` or `b` is not a cell of this board.
     #[must_use]
     fn distance(&self, a: Idx, b: Idx) -> u32 {
-        assert_cell(self.len(), a);
-        assert_cell(self.len(), b);
-        (self.metric().distance)(self.coord(a), self.coord(b))
+        let _ = slot(self.len(), self.tag(), a);
+        let _ = slot(self.len(), self.tag(), b);
+        self.metric().distance(self.coord(a), self.coord(b))
     }
 
     /// Every cell whose distance from `i` is in `min..=max`. Excludes `i` unless `min` is 0.
@@ -388,7 +501,7 @@ pub trait Grid {
     /// use spacewalk::{Adjacency, FullGrid, Grid, Sq};
     ///
     /// let board = FullGrid::square(8, 8, Adjacency::Four);
-    /// let archer = board.index_of(Sq::new(3, 3)).unwrap();
+    /// let archer = board.at(Sq::new(3, 3));
     ///
     /// // A range 1-2 attack covers the diamond around the archer — their own cell not included.
     /// assert_eq!(board.within(archer, 1, 2).len(), 12);
@@ -399,7 +512,7 @@ pub trait Grid {
     /// If `i` is not a cell of this board.
     #[must_use]
     fn within(&self, i: Idx, min: u32, max: u32) -> SubGrid<'_, Self::Root> {
-        assert_cell(self.len(), i);
+        let _ = slot(self.len(), self.tag(), i);
         if min > max {
             return self.subset([]);
         }
@@ -410,8 +523,9 @@ pub trait Grid {
         // that `count` is what makes the choice *safe*, not merely fast: it reports how big the
         // offset list would be without building it, so a preposterous radius routes to the scan
         // instead of trying to allocate the universe. Both branches are bounded by the board.
-        if (metric.count)(max) <= self.len() as u64 {
-            let hit: Vec<Idx> = (metric.deltas)(max)
+        if metric.count(max) <= self.len() as u64 {
+            let hit: Vec<Idx> = metric
+                .deltas(max)
                 .into_iter()
                 .filter(|&(_, d)| d >= min)
                 .filter_map(|(delta, _)| self.index_of(c + delta))
@@ -420,7 +534,7 @@ pub trait Grid {
         } else {
             self.subset(
                 self.indices()
-                    .filter(|&j| (min..=max).contains(&(metric.distance)(c, self.coord(j)))),
+                    .filter(|&j| (min..=max).contains(&metric.distance(c, self.coord(j)))),
             )
         }
     }
@@ -456,12 +570,13 @@ pub trait Grid {
     /// If `a` or `b` is not a cell of this board.
     #[must_use]
     fn line(&self, a: Idx, b: Idx) -> Vec<Idx> {
-        assert_cell(self.len(), a);
-        assert_cell(self.len(), b);
+        let _ = slot(self.len(), self.tag(), a);
+        let _ = slot(self.len(), self.tag(), b);
 
-        let Some(lerp) = self.metric().lerp else {
+        let metric = self.metric();
+        if !metric.has_lerp() {
             return Vec::new();
-        };
+        }
         if a == b {
             return vec![a]; // and never divide by zero, nor round a NaN into the origin
         }
@@ -476,7 +591,7 @@ pub trait Grid {
         let n = self.distance(lo, hi).min(self.len() as u32).max(1);
 
         let mut cells: Vec<Idx> = (0..=n)
-            .filter_map(|t| self.index_of(lerp(ca, cb, t, n)))
+            .filter_map(|t| self.index_of(metric.lerp(ca, cb, t, n)?))
             .collect();
         cells.dedup();
         if lo != a {
@@ -514,9 +629,9 @@ pub trait Grid {
     /// use spacewalk::{Adjacency, FullGrid, Grid, Sq};
     ///
     /// let board = FullGrid::square(5, 5, Adjacency::Eight);
-    /// let eye = board.index_of(Sq::new(0, 2)).unwrap();
-    /// let pillar = board.index_of(Sq::new(2, 2)).unwrap();
-    /// let behind = board.index_of(Sq::new(4, 2)).unwrap();
+    /// let eye = board.at(Sq::new(0, 2));
+    /// let pillar = board.at(Sq::new(2, 2));
+    /// let behind = board.at(Sq::new(4, 2));
     ///
     /// let seen = board.visible_from(eye, 4, |i| i == pillar);
     /// assert!(seen.contains(board.coord(pillar)), "you can see the wall you are looking at");
@@ -575,7 +690,7 @@ pub trait Grid {
     /// let g = FullGrid::square(5, 3, Adjacency::Four);
     /// let open = |i| g.coord(i).x != 2;
     ///
-    /// let west = g.component(g.index_of(Sq::new(0, 0)).unwrap(), open);
+    /// let west = g.component(g.at(Sq::new(0, 0)), open);
     /// assert_eq!(west.len(), 6, "two columns, three rows — the wall seals it");
     /// assert!(!g.is_connected(open));
     /// ```
@@ -585,7 +700,7 @@ pub trait Grid {
     /// If `i` is not a cell of this board.
     #[must_use]
     fn component(&self, i: Idx, passable: impl Fn(Idx) -> bool) -> SubGrid<'_, Self::Root> {
-        assert_cell(self.len(), i);
+        let _ = slot(self.len(), self.tag(), i);
         if !passable(i) {
             return self.subset([]);
         }
@@ -593,19 +708,19 @@ pub trait Grid {
         // A cell is marked before it is queued, so it is queued at most once and the frontier
         // cannot outgrow the board. Bounded by the board, like everything else here.
         let mut seen = vec![false; self.len()];
-        seen[i as usize] = true;
+        seen[i.raw() as usize] = true;
         let mut frontier = vec![i];
 
         while let Some(at) = frontier.pop() {
             for (_, j) in self.neighbors(at) {
-                if !seen[j as usize] && passable(j) {
-                    seen[j as usize] = true;
+                if !seen[j.raw() as usize] && passable(j) {
+                    seen[j.raw() as usize] = true;
                     frontier.push(j);
                 }
             }
         }
 
-        self.subset(self.indices().filter(|&j| seen[j as usize]))
+        self.subset(self.indices().filter(|&j| seen[j.raw() as usize]))
     }
 
     /// Whether the passable cells are one piece: every one of them reachable from the first.
@@ -643,12 +758,12 @@ pub trait Grid {
     ///
     /// let g = FullGrid::square(8, 8, Adjacency::Four);
     /// let walk = Movement::scan(&g, |_| Some(10));
-    /// let a = g.index_of(Sq::new(0, 0)).unwrap();
-    /// let b = g.index_of(Sq::new(3, 4)).unwrap();
+    /// let a = g.at(Sq::new(0, 0));
+    /// let b = g.at(Sq::new(3, 4));
     ///
     /// let p = g.path(a, b, &walk).unwrap();
     /// assert_eq!(p.len(), 7, "seven steps, four-way");
-    /// assert_eq!(p.steps.first(), Some(&a), "and the start is included, so eight cells");
+    /// assert_eq!(p.steps().first(), Some(&a), "and the start is included, so eight cells");
     /// ```
     ///
     /// # Panics
@@ -678,7 +793,7 @@ pub trait Grid {
     ///
     /// let g = FullGrid::square(9, 9, Adjacency::Four);
     /// let walk = Movement::scan(&g, |_| Some(10));
-    /// let centre = g.index_of(Sq::new(4, 4)).unwrap();
+    /// let centre = g.at(Sq::new(4, 4));
     ///
     /// // Three moves on open ground reaches a diamond of 25 cells, counting where you stand.
     /// assert_eq!(g.reachable(centre, 30, &walk).len(), 25);
@@ -730,7 +845,7 @@ pub trait Grid {
     /// let g = FullGrid::square(1, 4, Adjacency::Four);
     /// let m = Movement::scan(&g, |s| (s.dir == Dir8::S).then_some(10));
     ///
-    /// let bottom = g.index_of(Sq::new(0, 3)).unwrap();
+    /// let bottom = g.at(Sq::new(0, 3));
     ///
     /// // Everything above can reach the bottom...
     /// assert_eq!(g.reaching(bottom, 100, &m).len(), 4);
@@ -758,7 +873,7 @@ mod tests {
     #[test]
     fn a_ray_stops_at_the_edge() {
         let g = FullGrid::square(8, 8, Adjacency::Eight);
-        let corner = g.index_of(Sq::new(0, 0)).unwrap();
+        let corner = g.at(Sq::new(0, 0));
         assert_eq!(g.ray(corner, Dir8::E).count(), 7);
         assert_eq!(g.ray(corner, Dir8::W).count(), 0);
     }
@@ -766,7 +881,7 @@ mod tests {
     #[test]
     fn a_ray_stops_at_a_hole_but_an_offset_leaps_it() {
         let g = FullGrid::square(5, 1, Adjacency::Four).filtered(|c| c.x != 2);
-        let start = g.index_of(Sq::new(0, 0)).unwrap();
+        let start = g.at(Sq::new(0, 0));
 
         // The ray walks x=1 and then dies at the gap: it cannot slide through.
         assert_eq!(g.ray(start, Dir8::E).count(), 1);
@@ -778,7 +893,7 @@ mod tests {
     #[test]
     fn within_measures_coordinates_so_a_hole_does_not_shorten_it() {
         let g = FullGrid::hexagon(2).filtered(|c| c != Hex::new(1, 0));
-        let centre = g.index_of(Hex::new(0, 0)).unwrap();
+        let centre = g.at(Hex::new(0, 0));
 
         // (2,0) sits at distance 2 behind the hole at (1,0). It is still in range: an archer
         // shoots over a gap, and a jumping piece leaps one.
@@ -790,7 +905,7 @@ mod tests {
     #[test]
     fn within_zero_includes_the_origin_and_within_one_does_not() {
         let g = FullGrid::square(5, 5, Adjacency::Four);
-        let mid = g.index_of(Sq::new(2, 2)).unwrap();
+        let mid = g.at(Sq::new(2, 2));
 
         assert!(g.within(mid, 0, 1).contains(Sq::new(2, 2)));
         assert!(!g.within(mid, 1, 1).contains(Sq::new(2, 2)));
@@ -802,7 +917,7 @@ mod tests {
     #[test]
     fn a_run_walks_both_ways_and_reads_along_the_direction_it_was_asked_for() {
         let g = FullGrid::square(7, 1, Adjacency::Four);
-        let at = |x| g.index_of(Sq::new(x, 0)).unwrap();
+        let at = |x| g.at(Sq::new(x, 0));
         let wall = |i| (1..=5).contains(&g.coord(i).x);
 
         let east = g.run(at(3), Dir8::E, wall);
@@ -815,7 +930,7 @@ mod tests {
     #[test]
     fn a_run_always_holds_its_anchor_and_never_asks_about_it() {
         let g = FullGrid::square(5, 1, Adjacency::Four);
-        let mid = g.index_of(Sq::new(2, 0)).unwrap();
+        let mid = g.at(Sq::new(2, 0));
         assert_eq!(g.run(mid, Dir8::E, |_| false), vec![mid]);
     }
 
@@ -824,7 +939,7 @@ mod tests {
         // The reverse leg follows the in-edges, not the direction turned around. Here the north
         // step does not exist at all, and the line through the column is still whole.
         let g = ledges((0..4).map(|y| Sq::new(0, y)));
-        let mid = g.index_of(Sq::new(0, 2)).unwrap();
+        let mid = g.at(Sq::new(0, 2));
         assert_eq!(g.run(mid, Dir8::S, |_| true).len(), 4);
     }
 
@@ -833,8 +948,8 @@ mod tests {
         let g = FullGrid::square(5, 3, Adjacency::Four);
         let open = |i| g.coord(i).x != 2;
 
-        let west = g.component(g.index_of(Sq::new(0, 0)).unwrap(), open);
-        let east = g.component(g.index_of(Sq::new(4, 0)).unwrap(), open);
+        let west = g.component(g.at(Sq::new(0, 0)), open);
+        let east = g.component(g.at(Sq::new(4, 0)), open);
 
         assert_eq!(west.len(), 6);
         assert_eq!(east.len(), 6);
@@ -849,7 +964,7 @@ mod tests {
     #[test]
     fn a_component_excludes_a_start_that_is_itself_impassable() {
         let g = FullGrid::square(3, 3, Adjacency::Four);
-        let wall = g.index_of(Sq::new(1, 1)).unwrap();
+        let wall = g.at(Sq::new(1, 1));
         assert!(g.component(wall, |i| i != wall).is_empty());
     }
 
@@ -865,8 +980,8 @@ mod tests {
         // ordinary tactics feature. From the top everything below is in reach; from the bottom
         // nothing is.
         let g = ledges((0..4).map(|y| Sq::new(0, y)));
-        let top = g.index_of(Sq::new(0, 0)).unwrap();
-        let bottom = g.index_of(Sq::new(0, 3)).unwrap();
+        let top = g.at(Sq::new(0, 0));
+        let bottom = g.at(Sq::new(0, 3));
 
         assert_eq!(g.component(top, |_| true).len(), 4);
         assert_eq!(g.component(bottom, |_| true).len(), 1);
@@ -893,7 +1008,7 @@ mod tests {
         let mid = Sq::new(3, 3);
 
         let eight = FullGrid::square(7, 7, Adjacency::Eight);
-        let i = eight.index_of(mid).unwrap();
+        let i = eight.at(mid);
         assert_eq!(
             eight.within(i, 1, 2).len(),
             24,
@@ -901,7 +1016,7 @@ mod tests {
         );
 
         let four = FullGrid::square(7, 7, Adjacency::Four);
-        let j = four.index_of(mid).unwrap();
+        let j = four.at(mid);
         assert_eq!(four.within(j, 1, 2).len(), 12, "a diamond");
     }
 }

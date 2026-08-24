@@ -586,7 +586,7 @@ fn drawing_a_line_and_picking_a_cell_agree() {
             if a.distance(b) < 2 {
                 continue;
             }
-            let (ia, ib) = (g.index_of(a).unwrap(), g.index_of(b).unwrap());
+            let (ia, ib) = (g.at(a), g.at(b));
             let line = g.line(ia, ib);
 
             let (pa, pb) = (l.center(a), l.center(b));

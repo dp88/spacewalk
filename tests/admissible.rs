@@ -30,12 +30,12 @@ fn terrain(seed: u64, len: usize, costs: &[Cost]) -> Vec<Cost> {
 
 /// The cheapest path from corner to corner, found by A\* and by Dijkstra. They must agree.
 fn astar_and_dijkstra(g: &FullGrid<Sq>, cost: &[Cost]) -> (Cost, Cost) {
-    let enter = |s: Step<Sq>| Some(cost[s.to as usize]);
+    let enter = |s: Step<Sq>| Some(cost[s.to.get() as usize]);
 
     let with_heuristic = Movement::scan(g, enter);
     let no_heuristic = Movement::new(enter, 0); // h = 0 is Dijkstra
 
-    let from = g.index_of(Sq::new(0, 0)).unwrap();
+    let from = g.at(Sq::new(0, 0));
     let to = g
         .index_of(Sq::new(
             g.cells().last().unwrap().x,
@@ -44,8 +44,8 @@ fn astar_and_dijkstra(g: &FullGrid<Sq>, cost: &[Cost]) -> (Cost, Cost) {
         .unwrap();
 
     (
-        g.path(from, to, &with_heuristic).unwrap().cost,
-        g.path(from, to, &no_heuristic).unwrap().cost,
+        g.path(from, to, &with_heuristic).unwrap().cost(),
+        g.path(from, to, &no_heuristic).unwrap().cost(),
     )
 }
 
@@ -72,15 +72,15 @@ fn astar_matches_dijkstra_on_eight_way_grids_with_diagonal_costs() {
     for seed in 100..130 {
         let base = terrain(seed, g.len(), &[5, 10, 20]);
         let enter = |s: Step<Sq>| {
-            let c = base[s.to as usize];
+            let c = base[s.to.get() as usize];
             Some(if s.dir.is_diagonal() { c * 14 / 10 } else { c })
         };
 
-        let from = g.index_of(Sq::new(0, 0)).unwrap();
-        let to = g.index_of(Sq::new(15, 15)).unwrap();
+        let from = g.at(Sq::new(0, 0));
+        let to = g.at(Sq::new(15, 15));
 
-        let a = g.path(from, to, &Movement::scan(&g, enter)).unwrap().cost;
-        let d = g.path(from, to, &Movement::new(enter, 0)).unwrap().cost;
+        let a = g.path(from, to, &Movement::scan(&g, enter)).unwrap().cost();
+        let d = g.path(from, to, &Movement::new(enter, 0)).unwrap().cost();
         assert_eq!(a, d, "seed {seed}");
     }
 }
@@ -93,7 +93,7 @@ fn astar_matches_dijkstra_when_costs_are_directional() {
     for seed in 200..230 {
         let base = terrain(seed, g.len(), &[3, 10, 25]);
         let enter = |s: Step<Sq>| {
-            let c = base[s.to as usize];
+            let c = base[s.to.get() as usize];
             // Half the board flows south: going with it is cheap, against it is dear.
             Some(if c == 3 {
                 if s.dir == spacewalk::Dir8::S { 3 } else { 30 }
@@ -102,11 +102,11 @@ fn astar_matches_dijkstra_when_costs_are_directional() {
             })
         };
 
-        let from = g.index_of(Sq::new(0, 0)).unwrap();
-        let to = g.index_of(Sq::new(15, 15)).unwrap();
+        let from = g.at(Sq::new(0, 0));
+        let to = g.at(Sq::new(15, 15));
 
-        let a = g.path(from, to, &Movement::scan(&g, enter)).unwrap().cost;
-        let d = g.path(from, to, &Movement::new(enter, 0)).unwrap().cost;
+        let a = g.path(from, to, &Movement::scan(&g, enter)).unwrap().cost();
+        let d = g.path(from, to, &Movement::new(enter, 0)).unwrap().cost();
         assert_eq!(a, d, "seed {seed}");
     }
 }
@@ -116,7 +116,7 @@ fn scan_finds_the_cheapest_step_and_not_the_commonest_one() {
     let g = FullGrid::square(10, 10, Adjacency::Four);
     let cost = terrain(7, g.len(), &[5, 10, 20]);
 
-    let m = Movement::scan(&g, |s| Some(cost[s.to as usize]));
+    let m = Movement::scan(&g, |s| Some(cost[s.to.get() as usize]));
     assert_eq!(
         m.min_step(),
         5,
@@ -133,12 +133,12 @@ fn an_overstated_minimum_is_what_makes_astar_go_wrong() {
     // A road along the top row at 2; everything else costs 10.
     let enter = |s: Step<Sq>| Some(if g.coord(s.to).y == 0 { 2 } else { 10 });
 
-    let from = g.index_of(Sq::new(0, 2)).unwrap();
-    let to = g.index_of(Sq::new(11, 2)).unwrap();
+    let from = g.at(Sq::new(0, 2));
+    let to = g.at(Sq::new(11, 2));
 
-    let truth = g.path(from, to, &Movement::new(enter, 0)).unwrap().cost;
-    let honest = g.path(from, to, &Movement::scan(&g, enter)).unwrap().cost;
-    let liar = g.path(from, to, &Movement::new(enter, 10)).unwrap().cost;
+    let truth = g.path(from, to, &Movement::new(enter, 0)).unwrap().cost();
+    let honest = g.path(from, to, &Movement::scan(&g, enter)).unwrap().cost();
+    let liar = g.path(from, to, &Movement::new(enter, 10)).unwrap().cost();
 
     assert_eq!(
         honest, truth,

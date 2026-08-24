@@ -14,6 +14,10 @@ with the shape left open.
 spacewalk = "0.1"
 ```
 
+```rust
+use spacewalk::prelude::*;
+```
+
 ## The grid holds no game state
 
 A grid is cells, their indices, and which cell each direction leads to. It knows nothing of
@@ -30,8 +34,8 @@ let walk = Movement::scan(&g, |s| {
     Some(if mud.contains(&g.coord(s.to)) { 30 } else { 10 })
 });
 
-let from = g.index_of(Sq::new(0, 0)).unwrap();
-let to   = g.index_of(Sq::new(7, 7)).unwrap();
+let from = g.at(Sq::new(0, 0));
+let to   = g.at(Sq::new(7, 7));
 let path = g.path(from, to, &walk).unwrap();
 
 assert_eq!(path.len(), 14);                            // fourteen orthogonal steps
@@ -49,7 +53,7 @@ and subscripted by an `Idx` rather than by a cast you wrote out by hand:
 let g = FullGrid::square(8, 8, Adjacency::Four);
 let mut mud = CellMap::new(&g, false);
 
-mud[g.index_of(Sq::new(3, 3)).unwrap()] = true;
+mud[g.at(Sq::new(3, 3))] = true;
 assert_eq!(mud.iter().filter(|&(_, &m)| m).count(), 1);
 ```
 
@@ -69,7 +73,7 @@ you then reason over.
 ```rust
 # use spacewalk::{Adjacency, FullGrid, Grid, Movement, Sq};
 let g = FullGrid::square(16, 16, Adjacency::Eight);
-let unit = g.index_of(Sq::new(4, 4)).unwrap();
+let unit = g.at(Sq::new(4, 4));
 let walk = Movement::scan(&g, |_| Some(10));
 
 // Where can it go this turn? The cells, with what reaching each one costs.
@@ -77,10 +81,10 @@ let budget: Vec<_> = g.reachable(unit, 30, &walk);
 
 // As a board: now a route inside the highlight cannot wander outside it.
 let range = g.subset(budget.iter().map(|&(i, _)| i));
-let far = range.index_of(Sq::new(4, 7)).unwrap();
+let far = range.at(Sq::new(4, 7));
 
 assert!(range.contains(Sq::new(4, 7)));
-assert!(range.path(range.index_of(Sq::new(4, 4)).unwrap(), far, &walk).is_some());
+assert!(range.path(range.at(Sq::new(4, 4)), far, &walk).is_some());
 ```
 
 `within`, `ring`, `component` and `visible_from` hand one back directly; `subset` makes one from
@@ -95,8 +99,8 @@ downstream is cheap, upstream is dear.
 ```rust
 # use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Movement, Sq};
 # let g = FullGrid::square(8, 8, Adjacency::Four);
-let wall  = g.index_of(Sq::new(4, 4)).unwrap();
-let river = g.index_of(Sq::new(2, 2)).unwrap();
+let wall  = g.at(Sq::new(4, 4));
+let river = g.at(Sq::new(2, 2));
 
 let walk = Movement::scan(&g, |s| match s.to {
     t if t == wall  => None,                                          // impassable
@@ -104,11 +108,11 @@ let walk = Movement::scan(&g, |s| match s.to {
     _ => Some(10),                                                    // open ground
 });
 
-let above = g.index_of(Sq::new(2, 1)).unwrap();
-let below = g.index_of(Sq::new(2, 3)).unwrap();
+let above = g.at(Sq::new(2, 1));
+let below = g.at(Sq::new(2, 3));
 
-assert_eq!(g.path(above, below, &walk).unwrap().cost, 11);   // downstream, through the river
-assert_eq!(g.path(below, above, &walk).unwrap().cost, 40);   // upstream, cheaper to go around
+assert_eq!(g.path(above, below, &walk).unwrap().cost(), 11);   // downstream, through the river
+assert_eq!(g.path(below, above, &walk).unwrap().cost(), 40);   // upstream, cheaper to go around
 ```
 
 A conveyor belt, and a ledge you can drop off but not climb back up, are the same shape. One
@@ -164,6 +168,8 @@ is a one-way street: no float reaches a cost, so pathfinding stays integer and s
 
 | | |
 |---|---|
+| `at(c)`, `index_of(c)` | a coordinate to an index — panicking, and `Option`, for when off the board is an answer |
+| `coord(i)`, `coords_of(is)` | and back again, which is what you draw and what you save |
 | `step(i, dir)` | one cell along, respecting holes — the primitive everything is built from |
 | `neighbors(i)` | every neighbour, **with the direction that reaches it** |
 | `in_neighbors(j)` | every cell that can step *into* `j` — the graph is directed, so this differs |
@@ -175,6 +181,7 @@ is a one-way street: no float reaches a cost, so pathfinding stays integer and s
 | `component`, `is_connected` | islands: did the generated map split, does this wall seal the room |
 | `subset(cells)` | any cells you name, as a board — the highlight you draw and search |
 | `to_root`, `of_root` | a region's index, as the board that owns the cells numbers it |
+| `root_indices()` | a region as plain cells you can keep — a `SubGrid` borrows, so it cannot be stored |
 | `path`, `reachable`, `path_toward` | A\* and budget-bounded Dijkstra, over your cost closure |
 | `reaching(goal, …)` | who can reach *here* — a threat map, in one backward search |
 | `center`, `hex_at`, `corners` | where a cell is on screen, and which cell the mouse is over |
@@ -203,20 +210,48 @@ time rather than memory. Grids are capped at `MAX_CELLS`.
 `tests/robust.rs` is one test per bug, and it runs in release, because debug's overflow checks mask
 exactly the bugs that only exist without them.
 
-## Two things to know before you build one
+## An index knows which board issued it
 
-**Indices are not addresses.** `Idx` is a dense `u32`, valid only within the board that issued it.
-`filtered` renumbers, a `SubGrid` numbers its own cells from zero, and a stale index may quietly
-address a *different cell*. *Serialize coordinates, never indices.*
+`Idx` is a dense index, valid only within the board that issued it. `filtered` renumbers, a
+`SubGrid` numbers its own cells from zero, and a stale index would otherwise quietly address a
+*different cell*. No bounds check can find that: two boards of the same size number every cell in
+range for both.
+
+So an index carries its board, and a **debug build checks it**:
+
+```rust
+# use spacewalk::{Adjacency, FullGrid, Grid, Sq};
+let board = FullGrid::square(8, 8, Adjacency::Four);
+let dark = board.filtered(|c| (c.x + c.y) % 2 == 0);
+let light = board.filtered(|c| (c.x + c.y) % 2 == 1);
+assert_eq!(dark.len(), light.len());        // so no bound can tell them apart
+
+let cell = dark.at(Sq::new(2, 2));
+assert_eq!(dark.coord(cell), Sq::new(2, 2));
+
+// `light.coord(cell)` panics in debug: "issued by a different grid".
+// Shipped, it quietly answers Sq::new(3, 2).
+```
+
+In release the tag is zero-sized, the checks vanish, and an `Idx` is a bare `u32` again. Equality,
+ordering, and hashing compare the number alone in **both** profiles, so nothing you observe changes
+with the build — only whether you are told. It is a development aid, not a runtime guarantee:
+*serialize coordinates, never indices.*
 
 A subset makes this sharper than a filter does, because both numberings stay **live**: the region's
-index 0 and the board's index 0 are each valid and each a different cell, so no runtime check can
-tell them apart. `to_root` and `of_root` are the bridge, and the only correct one.
+index 0 and the board's index 0 are each valid and each a different cell. `to_root` and `of_root`
+are the bridge, and the only correct one.
 
-**The metric must agree with the adjacency.** An eight-way board measured with Manhattan distance is
-the classic tactics bug: a unit can *step* to the enemy diagonally beside it, but measures it as two
-cells away and so cannot *attack* it. `Adjacency` picks both together, so there is no second knob to
-get wrong.
+Two boards that number the same cells the same way share a tag and are interchangeable — which is
+what makes rebuilding from `cells()` restore the *same indices*, not merely an equivalent board.
+`Idx::get` reads the number out for a structure of your own; there is deliberately no way back in.
+
+## The metric must agree with the adjacency
+
+An eight-way board measured with Manhattan distance is the classic tactics bug: a unit can *step* to
+the enemy diagonally beside it, but measures it as two cells away and so cannot *attack* it.
+`Adjacency` picks both together, so there is no second knob to get wrong — and `FullGrid::new`
+checks the same thing per edge for a board you build yourself, so it panics rather than misbehaves.
 
 ## The tests are the examples
 
@@ -245,6 +280,8 @@ write, the change is wrong.
   memory bomb the fix must not ship
 - [`highlight`](tests/highlight.rs) — a turn's movement range and an attack, as boards you can
   draw and then search
+- [`identity`](tests/identity.rs) — an index belongs to one board, and says so when it is handed
+  to another
 - [`robust`](tests/robust.rs) — one test per bug that could take a machine down
 
 ```sh
@@ -252,6 +289,9 @@ cargo test
 cargo test --release          # robust's bugs hide behind debug's overflow checks; range_cost times the build you ship
 cargo test --all-features     # adds serde
 ```
+
+Run both profiles. The release build is where the index check is gone, and every answer must be the
+same without it — only whether a mistake is reported may differ.
 
 ## Requirements
 

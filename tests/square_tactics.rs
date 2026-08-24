@@ -20,7 +20,7 @@ fn reached(
     budget: Cost,
     m: &Movement<impl Fn(Step<Sq>) -> Option<Cost>>,
 ) -> Vec<Sq> {
-    let start = g.index_of(from).unwrap();
+    let start = g.at(from);
     let mut cells: Vec<Sq> = g
         .reachable(start, budget, m)
         .into_iter()
@@ -60,8 +60,8 @@ fn eight_way_melee_can_hit_a_diagonally_adjacent_enemy() {
     // the diagonal — so it had better measure it as one cell away, or it can stand beside an enemy
     // and be unable to swing at it.
     let g = FullGrid::square(8, 8, Adjacency::Eight);
-    let me = g.index_of(Sq::new(3, 3)).unwrap();
-    let enemy = g.index_of(Sq::new(4, 4)).unwrap();
+    let me = g.at(Sq::new(3, 3));
+    let enemy = g.at(Sq::new(4, 4));
 
     assert_eq!(g.distance(me, enemy), 1, "diagonally adjacent is ONE away");
     assert!(
@@ -77,8 +77,8 @@ fn four_way_melee_cannot_hit_diagonally() {
     // unit genuinely cannot step there either. The metric and the adjacency agree, which is the
     // whole point.
     let g = FullGrid::square(8, 8, Adjacency::Four);
-    let me = g.index_of(Sq::new(3, 3)).unwrap();
-    let enemy = g.index_of(Sq::new(4, 4)).unwrap();
+    let me = g.at(Sq::new(3, 3));
+    let enemy = g.at(Sq::new(4, 4));
 
     assert_eq!(g.distance(me, enemy), 2, "diagonally adjacent is TWO away");
     assert!(
@@ -94,7 +94,7 @@ fn archers_get_a_diamond_under_four_way_and_a_square_under_eight() {
 
     // A bow with range 2-3: it cannot fire at what is next to it.
     let four = FullGrid::square(11, 11, Adjacency::Four);
-    let i = four.index_of(mid).unwrap();
+    let i = four.at(mid);
     let diamond = four.within(i, 2, 3);
     assert!(!diamond.contains(Sq::new(6, 5)), "too close");
     assert!(diamond.contains(Sq::new(8, 5)), "three east");
@@ -102,7 +102,7 @@ fn archers_get_a_diamond_under_four_way_and_a_square_under_eight() {
     assert!(!diamond.contains(Sq::new(7, 7)), "the diamond's corner");
 
     let eight = FullGrid::square(11, 11, Adjacency::Eight);
-    let j = eight.index_of(mid).unwrap();
+    let j = eight.at(mid);
     let square = eight.within(j, 2, 3);
     assert!(
         square.contains(Sq::new(7, 7)),
@@ -117,16 +117,16 @@ fn terrain_makes_a_unit_go_around() {
     let mountains = [Sq::new(3, 0), Sq::new(3, 1)];
     let m = Movement::scan(&g, |s| (!mountains.contains(&g.coord(s.to))).then_some(10));
 
-    let from = g.index_of(Sq::new(0, 0)).unwrap();
-    let to = g.index_of(Sq::new(6, 0)).unwrap();
+    let from = g.at(Sq::new(0, 0));
+    let to = g.at(Sq::new(6, 0));
 
     let p = g.path(from, to, &m).unwrap();
     assert!(
-        p.steps.iter().any(|&i| g.coord(i) == Sq::new(3, 2)),
+        p.steps().iter().any(|&i| g.coord(i) == Sq::new(3, 2)),
         "it must funnel through the gap"
     );
     // Six east if the ridge were not there, plus two south and two north to get round it.
-    assert_eq!(p.cost, 100);
+    assert_eq!(p.cost(), 100);
 }
 
 #[test]
@@ -138,8 +138,8 @@ fn a_unit_cannot_walk_through_another() {
     // is; BattleCore threaded a `blocked: &HashSet<Position>` through every signature to say this.
     let m = Movement::scan(&g, |s| (g.coord(s.to) != blocker).then_some(10));
 
-    let from = g.index_of(Sq::new(0, 0)).unwrap();
-    let to = g.index_of(Sq::new(4, 0)).unwrap();
+    let from = g.at(Sq::new(0, 0));
+    let to = g.at(Sq::new(4, 0));
     assert!(g.path(from, to, &m).is_none(), "the corridor is plugged");
 }
 
@@ -148,14 +148,14 @@ fn a_pursuing_unit_closes_on_a_target_it_cannot_reach_this_turn() {
     let g = FullGrid::square(12, 1, Adjacency::Four);
     let m = plain(&g);
 
-    let me = g.index_of(Sq::new(0, 0)).unwrap();
-    let enemy = g.index_of(Sq::new(11, 0)).unwrap();
+    let me = g.at(Sq::new(0, 0));
+    let enemy = g.at(Sq::new(11, 0));
 
     let p = g.path_toward(me, enemy, 30, &m).unwrap();
     assert_eq!(
-        g.coord(p.destination().unwrap()),
+        g.coord(p.destination()),
         Sq::new(3, 0),
         "spends its whole move closing"
     );
-    assert_eq!(g.distance(p.destination().unwrap(), enemy), 8);
+    assert_eq!(g.distance(p.destination(), enemy), 8);
 }
