@@ -169,6 +169,17 @@
 //!   holds function pointers. `tests/save.rs` shows what to persist instead — coordinates, never
 //!   indices, and a `CellMap` only alongside the cells that fix its order.
 //!
+//! # No dependencies
+//!
+//! `cargo tree` is one line. The `serde` feature above is optional and off by default; nothing else
+//! is pulled in at all, and the searches behind [`Grid::path`] and [`Grid::reachable`] are the
+//! crate's own.
+//!
+//! That is not austerity for its own sake. A general graph library must key its bookkeeping on
+//! whatever a node happens to be, so it reaches for a hash map — and a board's cells are already
+//! numbered `0..len`, which turns that map into two vectors read by subscript. Dropping the
+//! library made the crate smaller *and* faster.
+//!
 //! # Where to start
 //!
 //! [`prelude`] imports the names above in one line. [`Grid`] is where the vocabulary lives, and its
@@ -188,6 +199,8 @@ pub mod grid;
 pub mod layout;
 pub mod path;
 pub mod rect;
+/// A\* and Dijkstra over a board's dense indices. Private: [`Grid`] is the way in.
+mod search;
 pub mod square;
 pub mod sub;
 

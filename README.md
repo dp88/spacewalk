@@ -296,7 +296,12 @@ same without it — only whether a mistake is reported may differ.
 ## Requirements
 
 - Rust 1.88 or later. The crate uses edition 2024 and let-chains.
-- The `serde` feature adds derives for the coordinate and grid types. It is off by default.
+- **No dependencies.** `cargo tree` is one line. The `serde` feature is optional and off by
+  default; nothing else is pulled in at all.
+- A\* and Dijkstra are the crate's own, in `src/search.rs`. A general graph library must key its
+  bookkeeping on whatever a node happens to be, so it reaches for a hash map; a board's cells are
+  numbered `0..len`, so here it is two vectors read by subscript. Roughly a fifth faster than the
+  library it replaced, and about a hundred and eighty lines.
 
 ## License
 

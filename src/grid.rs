@@ -773,7 +773,7 @@ pub trait Grid {
     where
         F: Fn(Step<Self::Cell>) -> Option<Cost>,
     {
-        crate::path::find(self, start, goal, m)
+        crate::search::find(self, start, goal, m)
     }
 
     /// Every cell reachable from `start` for no more than `budget`, and what reaching it costs.
@@ -805,7 +805,7 @@ pub trait Grid {
     where
         F: Fn(Step<Self::Cell>) -> Option<Cost>,
     {
-        crate::path::reach(self, start, budget, m).0
+        crate::search::reachable(self, start, budget, m)
     }
 
     /// The reachable cell that lands closest to `target`, and the path to it.
@@ -824,7 +824,7 @@ pub trait Grid {
     where
         F: Fn(Step<Self::Cell>) -> Option<Cost>,
     {
-        crate::path::toward(self, start, target, budget, m)
+        crate::search::toward(self, start, target, budget, m)
     }
 
     /// Every cell that can **reach** `goal` for no more than `budget`, and what it costs them.
@@ -860,7 +860,7 @@ pub trait Grid {
     where
         F: Fn(Step<Self::Cell>) -> Option<Cost>,
     {
-        crate::path::reaching(self, goal, budget, m)
+        crate::search::reaching(self, goal, budget, m)
     }
 }
 

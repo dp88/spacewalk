@@ -44,13 +44,9 @@
 //! ```
 
 use std::fmt;
-use std::ops::Add;
-
-use pathfinding::num_traits::Zero;
-use pathfinding::prelude::{astar, dijkstra_reach};
 
 use crate::coord::{Coord, Idx};
-use crate::grid::{Grid, cost_ceiling, slot};
+use crate::grid::{Grid, cost_ceiling};
 
 /// What a step costs.
 ///
@@ -64,49 +60,6 @@ use crate::grid::{Grid, cost_ceiling, slot};
 /// costs are too large for the board, so in practice you will be told. See [`Movement::new`] for the
 /// unchecked way, and why you probably do not want it.
 pub type Cost = u32;
-
-/// A running total, which **saturates instead of wrapping**.
-///
-/// This exists because of a bug that took a machine down, and it is worth knowing about.
-///
-/// Dijkstra and A\* rest on one invariant: *extending a path may never make it cheaper*. That is
-/// what lets them settle a cell and stop reconsidering it. Rust does not check integer overflow in
-/// release builds — it wraps — so a total that runs past [`Cost::MAX`] comes back round as a
-/// **small** number, and a longer path suddenly looks cheaper than a short one. The invariant
-/// breaks, cells re-open forever, the search's heap grows without bound, and the process eats
-/// memory until the machine dies. In release only. Which is the build a game ships.
-///
-/// Saturating addition is monotone non-decreasing, so the invariant holds no matter what numbers
-/// come in. The search stays bounded and terminates; a total that would have overflowed simply pegs
-/// at the maximum. Wrong-but-bounded beats fatal, and [`Movement::scan`] refuses the inputs that
-/// would get here in the first place — so this is the second line of defence, not the first.
-///
-/// `pathfinding` asks for `Zero + Ord + Copy`, and `Zero` implies `Add`. Every sum the search
-/// performs — and there are four, across A\* and Dijkstra — goes through the one `Add` below.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-struct Acc(Cost);
-
-impl Add for Acc {
-    type Output = Self;
-    fn add(self, o: Self) -> Self {
-        Acc(self.0.saturating_add(o.0))
-    }
-}
-
-impl Zero for Acc {
-    fn zero() -> Self {
-        Acc(0)
-    }
-    fn is_zero(&self) -> bool {
-        self.0 == 0
-    }
-}
-
-/// No predecessor: the search's root, or a cell it never reached.
-///
-/// The parent vector holds bare `u32`, not [`Idx`]. It is one slot per cell of the board being
-/// searched, so every entry is that board's by construction.
-const NO_PARENT: u32 = u32::MAX;
 
 /// One step: leaving `from`, entering `to`, travelling in `dir`.
 ///
@@ -220,6 +173,17 @@ impl<F> Movement<F> {
     #[must_use]
     pub fn min_step(&self) -> Cost {
         self.min_step
+    }
+
+    /// What one step costs, or `None` where the rules forbid it.
+    ///
+    /// Crate-internal: the searches ask, callers answer. Exposing it would invite a caller to price
+    /// a step that no board would ever offer.
+    pub(crate) fn enter<C: Coord>(&self, s: Step<C>) -> Option<Cost>
+    where
+        F: Fn(Step<C>) -> Option<Cost>,
+    {
+        (self.enter)(s)
     }
 }
 
@@ -340,151 +304,6 @@ impl Path {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-}
-
-/// One priced edge, as the pathfinding crate wants it — shared by `succ` and `pred`. The
-/// debug_assert is the admissibility contract — no step may cost less than the minimum the
-/// heuristic was promised — checked while you test, compiled out when you ship. In release the
-/// contract rests on [`Movement::scan`], which guarantees it by construction.
-fn edge(cost: Option<Cost>, node: Idx, floor: Cost) -> Option<(Idx, Acc)> {
-    let cost = cost?;
-    debug_assert!(
-        cost >= floor,
-        "a step costs {cost}, below the promised minimum of {floor}: the A* heuristic \
-         will overestimate and paths will not be optimal. Use Movement::scan."
-    );
-    Some((node, Acc(cost)))
-}
-
-/// The neighbours of `i` that can actually be entered, and what entering them costs.
-fn succ<'a, B, F>(b: &'a B, i: Idx, m: &'a Movement<F>) -> impl Iterator<Item = (Idx, Acc)> + 'a
-where
-    B: Grid + ?Sized,
-    F: Fn(Step<B::Cell>) -> Option<Cost>,
-{
-    b.neighbors(i)
-        .filter_map(move |(dir, to)| edge((m.enter)(Step { from: i, to, dir }), to, m.min_step))
-}
-
-/// The cells that can step into `j`, and what that step costs them. `succ`, in reverse.
-fn pred<'a, B, F>(b: &'a B, j: Idx, m: &'a Movement<F>) -> impl Iterator<Item = (Idx, Acc)> + 'a
-where
-    B: Grid + ?Sized,
-    F: Fn(Step<B::Cell>) -> Option<Cost>,
-{
-    b.in_neighbors(j)
-        .filter_map(move |(dir, from)| edge((m.enter)(Step { from, to: j, dir }), from, m.min_step))
-}
-
-/// Behind [`Grid::path`]: A*, with an admissible heuristic from the board's metric.
-pub(crate) fn find<B, F>(b: &B, start: Idx, goal: Idx, m: &Movement<F>) -> Option<Path>
-where
-    B: Grid + ?Sized,
-    F: Fn(Step<B::Cell>) -> Option<Cost>,
-{
-    let _ = slot(b.len(), b.tag(), start);
-    let _ = slot(b.len(), b.tag(), goal);
-
-    // A* adds this to the running total (`estimated_cost = g + h`), so it must not be allowed
-    // to wrap — which is precisely what a `saturating_mul` here used to cause, by handing the
-    // search a colossal `h` that then overflowed on the very next `+`. Acc's addition saturates,
-    // so both halves are safe.
-    let heuristic = |&i: &Idx| Acc(b.distance(i, goal).saturating_mul(m.min_step));
-
-    astar(&start, |&i| succ(b, i, m), heuristic, |&i| i == goal)
-        .map(|(steps, cost)| Path::of(steps, cost.0))
-}
-
-/// Behind [`Grid::path_toward`]: one bounded search, then the parent chain home.
-pub(crate) fn toward<B, F>(
-    b: &B,
-    start: Idx,
-    target: Idx,
-    budget: Cost,
-    m: &Movement<F>,
-) -> Option<Path>
-where
-    B: Grid + ?Sized,
-    F: Fn(Step<B::Cell>) -> Option<Cost>,
-{
-    let _ = slot(b.len(), b.tag(), target);
-
-    let (seen, parent) = reach(b, start, budget, m);
-    let &(goal, cost) = seen
-        .iter()
-        .min_by_key(|&&(i, c)| (b.distance(i, target), c, i))?;
-
-    // Walk the parent chain home. It is a tree rooted at `start`, so this terminates — but the
-    // bound is not free-floating trust in a dependency's internals: a chain longer than the
-    // board has cells would mean a cycle, and we would rather stop than fill memory with it.
-    let mut steps = vec![goal];
-    let mut at = goal;
-    while at != start {
-        let up = parent[at.raw() as usize];
-        assert!(
-            up != NO_PARENT && steps.len() <= b.len(),
-            "the search's parent chain is broken or cyclic — this is a bug in spacewalk",
-        );
-        at = Idx::new(b.tag(), up);
-        steps.push(at);
-    }
-    steps.reverse();
-
-    Some(Path::of(steps, cost))
-}
-
-/// Behind [`Grid::reaching`]: one backward Dijkstra, bounded by the budget.
-pub(crate) fn reaching<B, F>(b: &B, goal: Idx, budget: Cost, m: &Movement<F>) -> Vec<(Idx, Cost)>
-where
-    B: Grid + ?Sized,
-    F: Fn(Step<B::Cell>) -> Option<Cost>,
-{
-    let _ = slot(b.len(), b.tag(), goal);
-    let cap = Acc(budget);
-
-    dijkstra_reach(&goal, |&j| pred(b, j, m))
-        .take_while(|it| it.total_cost <= cap)
-        .map(|it| (it.node, it.total_cost.0))
-        .collect()
-}
-
-/// One budget-bounded Dijkstra: the cells it reached, and how it got to each.
-///
-/// `dijkstra_reach` yields cells in increasing cost order, so the moment one exceeds the
-/// budget every cell after it does too, and we stop. That is a real early exit — and it hands
-/// back the parent pointers, so `toward` needs one search rather than a Dijkstra to find
-/// the destination followed by an A\* to reach it.
-///
-/// That "increasing cost order" is only true because [`Acc`] cannot wrap. With wrapping totals
-/// the order is arbitrary, and this `break` would fire at a random point — silently truncating
-/// the answer.
-pub(crate) fn reach<B, F>(
-    b: &B,
-    start: Idx,
-    budget: Cost,
-    m: &Movement<F>,
-) -> (Vec<(Idx, Cost)>, Vec<u32>)
-where
-    B: Grid + ?Sized,
-    F: Fn(Step<B::Cell>) -> Option<Cost>,
-{
-    let _ = slot(b.len(), b.tag(), start);
-
-    let cap = Acc(budget);
-    let mut parent = vec![NO_PARENT; b.len()];
-    let mut seen = Vec::new();
-
-    for it in dijkstra_reach(&start, |&i| succ(b, i, m)) {
-        if it.total_cost > cap {
-            break;
-        }
-        if let Some(p) = it.parent {
-            parent[it.node.raw() as usize] = p.raw();
-        }
-        seen.push((it.node, it.total_cost.0));
-    }
-
-    (seen, parent)
 }
 
 #[cfg(test)]
