@@ -26,5 +26,8 @@ rustc-ice-*.txt
 # Library projects generally do not commit the lockfile.
 Cargo.lock
 
+# Affinity lock files.
+**/*~lock~
+
 # macOS metadata.
 .DS_Store

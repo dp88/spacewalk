@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 keywords = ["grid", "hex", "pathfinding", "tactics", "gamedev"]
 categories = ["game-development", "data-structures"]
 readme = "README.md"
-exclude = [".github/"]
+exclude = [".github/", "art/banner.af"]
 
 [features]
 default = []
