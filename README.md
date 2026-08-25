@@ -1,345 +1,324 @@
 ![spacewalk banner](art/banner.webp)
 
+*Banner image: [“Astronaut Walks in Space”](https://artvee.com/dl/astronaut-walks-in-space), via Artvee.*
+
 # spacewalk
 
-[![CI](https://github.com/dp88/spacewalk/actions/workflows/ci.yml/badge.svg)](https://github.com/dp88/spacewalk/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+## SPECIAL REPORT — A SMALL GRID LIBRARY ENTERS THE SPACE RACE
 
-A generic basis for grids: square, hex, and whatever else your game needs.
+There is a new instrument in the mission-control room for board games, tactics games, tile maps,
+and other operations conducted on a lattice. `spacewalk` supplies the geometry: cells, directions,
+distance, sight, regions, and routes. It does not carry pieces, terrain, players, or a game clock.
+Those remain under the command of your application.
 
-Board games and tactics games have the same skeleton — a set of cells, a notion of which cells
-touch which, a distance, and a way to find a route. Only the shape changes. This is that skeleton,
-with the shape left open.
+The crate is generic enough for square, hexagonal, and unusual boards, yet direct enough for the
+ordinary case. It is `#![no_std]`, uses `alloc`, and keeps pathfinding in integer arithmetic so a
+replay on one machine agrees with a replay on another.
 
 ```toml
 [dependencies]
 spacewalk = "0.1"
 ```
 
-```rust
-use spacewalk::prelude::*;
-```
+## THE FIRST LAUNCH: FROM COORDINATES TO A ROUTE
 
-## The grid holds no game state
-
-A grid is cells, their indices, and which cell each direction leads to. It knows nothing of
-terrain, pieces, or players — you keep those, in whatever shape suits you, and hand the grid a
-closure when you want a path.
+The usual mission begins with a square map and a unit that must cross it. The coordinate-first API
+keeps dense indices in the machinery room while the application speaks in cells.
 
 ```rust
 use spacewalk::{Adjacency, FullGrid, Grid, Movement, Sq};
 
-let g = FullGrid::square(8, 8, Adjacency::Four);
-let mud = vec![Sq::new(3, 3), Sq::new(3, 4)];          // your data, your types
+let grid = FullGrid::square(8, 8, Adjacency::Four);
+let mud = [Sq::new(3, 3), Sq::new(3, 4)];
 
-let walk = Movement::cell_cost(&g, |cell| {
+let movement = Movement::cell_cost(&grid, |cell| {
     Some(if mud.contains(&cell) { 30 } else { 10 })
 });
 
-let path = g
-    .path_between(Sq::new(0, 0), Sq::new(7, 7), &walk)
-    .unwrap();
+let route = grid
+    .path_between(Sq::new(0, 0), Sq::new(7, 7), &movement)
+    .expect("the route should be open");
 
-assert_eq!(path.len(), 14);                            // fourteen orthogonal steps
-assert_eq!(path.cells(&g).count(), 15);                 // coordinates, including the start
+assert_eq!(route.len(), 14);
+assert_eq!(route.cells(&grid).count(), 15); // the start is included
 ```
 
-That keeps the grid immutable and shareable, and keeps it out of your borrow checker's way:
-`&grid` and `&mut your_state` are different objects, so an AI search can read the board while it
-mutates the position, and cloning a position never copies the board.
+`Grid::path_between` returns `None` if either coordinate is off the board or if no route exists.
+The index-oriented `Grid::path` remains available when a hot loop or a side table already works in
+`Idx` values.
 
-When your state is simply one value per cell, `CellMap<T>` is that vector — sized from the board,
-and subscripted by an `Idx` rather than by a cast you wrote out by hand:
+## WHAT MISSION CONTROL RECEIVES
+
+The public vocabulary is the `Grid` trait. Three board types speak it:
+
+| Instrument | Assignment |
+|---|---|
+| `FullGrid<C>` | Stores any set of `C` cells, their directions, an index, and forward and reverse step tables. |
+| `RectGrid` | Computes a rectangular square board arithmetically, without storing a cell or edge table. |
+| `SubGrid<'a, B>` | Borrows a board and presents a selected region as a board of its own. |
+
+All three answer the same questions. Code written against `Grid` can move from a full map to a
+rectangle or a highlighted region without a change of course.
+
+`FullGrid` is the general launch vehicle. It accepts any `Coord`, removes duplicate cells while
+keeping the first occurrence, and preserves the caller’s cell order as the index order. It also
+inverts its step table, so one can ask not only where a cell may go but which cells may enter it.
+
+The built-in square and hex missions are:
+
+- `FullGrid::square(w, h, Adjacency::Four)` — orthogonal movement and Manhattan distance.
+- `FullGrid::square(w, h, Adjacency::Eight)` — orthogonal and diagonal movement with Chebyshev distance.
+- `FullGrid::disc(radius, adjacency)` — an origin-centred circular selection of square cells.
+- `FullGrid::hexagon(radius)` — an origin-centred axial hexagon.
+- `FullGrid::hex_rect(w, h, offset)` — a rectangular hex field in a tile-map offset convention.
+
+`FullGrid::filtered` creates a new, independent board and numbers its surviving cells again. Use
+`Grid::subset` when the desired result is a temporary region that must still know its parent board.
+
+## THE GRID’S FLIGHT INSTRUMENTS
+
+For a coordinate-first mission, the common controls are:
+
+| Control | Report |
+|---|---|
+| `at(c)` / `index_of(c)` | Convert a coordinate to an index; the first panics off-board, the second returns `Option`. |
+| `step_from(c, dir)` | Take one geometric step and return the destination coordinate, or `None`. |
+| `coord(i)` / `coords_of(indices)` | Convert indices back to coordinates for drawing, saving, or application state. |
+| `neighbors(i)` / `in_neighbors(i)` | Inspect outgoing or incoming edges, with their directions. |
+| `ray(i, dir)` | Slide through successive cells until the board or a hole ends the flight. |
+| `run(i, dir, same)` | Collect the uninterrupted line through a cell in both directions. |
+| `offset(i, delta)` | Make a coordinate hop that ignores intervening board cells: a knight or a jump. |
+| `distance`, `within`, `ring` | Measure range in coordinates and return regions as `SubGrid`s. |
+| `line`, `los`, `visible_from` | Draw lines and determine whether blockers interrupt sight. |
+| `component`, `is_connected` | Survey passable islands and forward connectivity. |
+| `subset` | Turn any selected indices into a borrowed board of their own. |
+| `path`, `reachable`, `path_toward`, `reaching` | Search the directed movement graph. |
+
+The coordinate-first counterparts are `within_cell`, `visible_from_cell`, `component_from`,
+`path_between`, `reachable_from`, and `reaching_cell`. They return coordinates, `Path`s, or
+`SubGrid`s as appropriate, and return `None` when the named origin or destination is off-board.
+
+## COST OF THE FLIGHT: ENTERING A CELL
+
+Movement costs belong to the cell being entered and to the direction of arrival. The graph is
+therefore directed. A river may be cheap downstream and dear upstream; a conveyor may carry a
+craft one way; a ledge may be descended but not climbed.
+
+`None` means the step is forbidden. Costs are `u32` values, and the callback must be pure: A* may
+ask about the same step more than once.
+
+For terrain keyed by coordinates, use `Movement::cell_cost`. For currents, ledges, and other
+directional rules, use `Movement::edge_cost`:
 
 ```rust
-# use spacewalk::{Adjacency, CellMap, FullGrid, Grid, Sq};
-let g = FullGrid::square(8, 8, Adjacency::Four);
-let mut mud = CellMap::new(&g, false);
+use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Movement, Sq};
 
-mud[g.at(Sq::new(3, 3))] = true;
-assert_eq!(mud.iter().filter(|&(_, &m)| m).count(), 1);
-assert_eq!(mud.as_slice().len(), g.len());
+let grid = FullGrid::square(8, 8, Adjacency::Four);
+let river = Sq::new(2, 2);
 
-for (_, wet) in mud.iter_mut() {
-    *wet = false;
-}
-assert!(mud.get(g.at(Sq::new(3, 3))).is_some());
-```
-
-It borrows the grid to measure itself and does not hold one, so those are still two objects. It
-goes stale exactly as an `Idx` does: build a fresh one after `filtered`. `get` and `get_mut` are
-the checked alternatives to indexing, while `as_slice`, `as_mut_slice`, `iter_mut`, `fill`, and
-`into_vec` make the map fit ordinary collection APIs.
-
-## A region of a board is a board
-
-`Grid` is the vocabulary — every question below, asked of anything that is a board. `FullGrid` is
-one you built; `RectGrid` is a plain rectangle it computes instead of stores; `SubGrid` is *part*
-of either, and it is a board in its own right, with its own edges, its own components, and its own
-paths.
-
-That is what a highlighted range is: ask for one, and you get the thing you draw **and** the thing
-you then reason over.
-
-```rust
-# use spacewalk::{Adjacency, FullGrid, Grid, Movement, Sq};
-let g = FullGrid::square(16, 16, Adjacency::Eight);
-let walk = Movement::uniform(&g, 10);
-
-// Where can it go this turn? The cells, with what reaching each one costs.
-let budget: Vec<_> = g.reachable_from(Sq::new(4, 4), 30, &walk).unwrap();
-
-// As a board: now a route inside the highlight cannot wander outside it.
-let range = g.subset(budget.iter().map(|&(c, _)| g.at(c)));
-let range_walk = Movement::uniform(&range, 10);
-
-assert!(range.contains(Sq::new(4, 7)));
-assert!(range
-    .path_between(Sq::new(4, 4), Sq::new(4, 7), &range_walk)
-    .is_some());
-```
-
-`within`, `ring`, `component` and `visible_from` hand one back directly; `subset` makes one from
-any cells you name. A `SubGrid` borrows rather than copies, so asking for one costs a sort, not a
-board — which is why a range query can return one at all.
-
-## Cost is what it costs to *enter* a cell, from a *direction*
-
-Not the cost *of* the cell. That difference is what lets a board hold a river: entering it
-downstream is cheap, upstream is dear.
-
-```rust
-# use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Movement, Sq};
-# let g = FullGrid::square(8, 8, Adjacency::Four);
-let walk = Movement::edge_cost(&g, |_, to, dir| {
+let movement = Movement::edge_cost(&grid, |_from, to, direction| {
     if to == Sq::new(4, 4) {
-        None                                                        // impassable
-    } else if to == Sq::new(2, 2) {
-        Some(if dir == Dir8::S { 1 } else { 50 })                  // the current runs south
+        None
+    } else if to == river {
+        Some(if direction == Dir8::S { 1 } else { 50 })
     } else {
-        Some(10)                                                   // open ground
+        Some(10)
     }
 });
 
-assert_eq!(g.path_between(Sq::new(2, 1), Sq::new(2, 3), &walk).unwrap().cost(), 11);
-assert_eq!(g.path_between(Sq::new(2, 3), Sq::new(2, 1), &walk).unwrap().cost(), 40);
+assert_eq!(
+    grid.path_between(Sq::new(2, 1), Sq::new(2, 3), &movement)
+        .unwrap()
+        .cost(),
+    11
+);
 ```
 
-A conveyor belt, and a ledge you can drop off but not climb back up, are the same shape. One
-`Option<Cost>` closure covers terrain cost, impassable cells, cells blocked by other pieces, and
-one-way movement — four separate mechanisms in most engines.
+The constructors are as follows:
 
-The price is that the graph is **directed**: a path cannot be reversed, and reaching somewhere does
-not mean you can get back.
+- `Movement::scan` examines every legal edge, discovers the cheapest step, and checks that costs
+  cannot overflow a path total.
+- `Movement::uniform` assigns one cost to every step without scanning the board.
+- `Movement::new` accepts a caller-promised minimum and performs no validation; promising too high
+  a minimum can make A* return a non-cheapest route.
+- `Movement::try_scan` and `Movement::try_uniform` return `MovementError` instead of panicking when
+  the cost ceiling is exceeded.
 
-## Four shapes ship; the rest is yours
+No simple path visits a cell twice, so the safe per-step ceiling is `Cost::MAX / max(1, cells - 1)`.
+The search saturates totals rather than wrapping them, but a saturated total is not a meaningful
+route cost; the checked constructors are the recommended launch procedure.
 
-`FullGrid::square`, `FullGrid::disc`, `FullGrid::hexagon` and `FullGrid::hex_rect` are the common
-cases. A disc is a round board of square cells centred on the origin, which is what an arena wants
-and what `square` cannot give you — it only ever emits `0..w` by `0..h`, so it has no middle to
-name. A hex rectangle is what a tactics map usually is and what a tilemap editor authors. Beyond
-them, `FullGrid::new` takes any set of cells at all, and `FullGrid::filtered` drops the ones you
-don't want — a draughts board is the dark squares of a square grid, a holed hex board is a hexagon
-less its gaps.
+## A* AND DIJKSTRA ON A DIRECTED MAP
 
-A game with a genuinely different geometry implements `Coord`, which is three items: an associated
-direction type, the list of directions, and where one step lands. `tests/chess3d.rs` builds a
-three-layer chess board that way, in the test file, with no change to this crate.
+`Grid::path` uses A* with the board’s metric and the movement model’s cheapest step. With an honest
+minimum step and an admissible metric, it returns a cheapest route. `Grid::reachable` is a forward,
+budget-bounded Dijkstra search. `Grid::reaching` runs the reverse question: which cells can reach
+this target, and at what cost?
 
-The constructors also have fallible forms for dimensions and board definitions that come from
-outside the program: `try_square`, `try_disc`, `try_hexagon`, `try_hex_rect`, `RectGrid::try_new`,
-and `FullGrid::try_new` return `GridError`. The original constructors remain convenient panic-on-
-invalid-input wrappers. `Movement::try_scan` and `Movement::try_uniform` do the same for costs that
-could overflow a path total, returning `MovementError`.
+`Grid::path_toward` returns the best route that can be completed within a budget, even when the
+target itself is beyond reach. Ties are resolved deterministically by distance, cost, and index.
 
-For ordinary application code, coordinate-first helpers keep dense indices at the boundary:
-`step_from`, `within_cell`, `visible_from_cell`, `component_from`, `path_between`,
-`reachable_from`, and `reaching_cell` accept coordinates and return coordinates or a `SubGrid` as
-appropriate. The index-based methods remain available when a `CellMap`, custom array, or hot loop
-needs them.
+Paths contain indices because the search operates on dense board slots. `Path::steps` exposes them;
+`Path::cells(&grid)` turns them into coordinates. The path and grid must be the same board. In debug
+builds, the crate’s identity checks report a mismatch.
 
-## Drawing it, and clicking on it
+## RANGE, SIGHT, AND THE METRIC
 
-The lattice does not know what a pixel is, and does not need to — until you want to *show* it.
+`Metric::scanning` supplies only a distance function and makes range queries scan the board. This
+is the proper choice for a non-translation-invariant or high-dimensional coordinate system.
+`Metric::tabulated` additionally supplies a count and offset generator, allowing `within` and
+`ring` to build a small neighbourhood instead of surveying the whole board. The grid checks the
+count before allocating; an extravagant radius falls back to a board scan.
+
+A metric must not overestimate the number of movement steps. For a `FullGrid`, each actual edge is
+also checked: one direction may not span more than one metric unit. If a board contains genuine
+multi-cell jumps or portals, an always-underestimating metric—often one that returns zero—keeps the
+answer correct while making A* behave like Dijkstra.
+
+Line of sight requires a metric with `lerp`. Built-in square and hex metrics provide one; an exotic
+coordinate may honestly omit it, in which case `line` returns no samples and `los` has no blockers
+to inspect. `visible_from` uses bounded raycasting and refuses radii above `MAX_SIGHT`, currently 64.
+On sparse boards with
+coordinates very far apart, line sampling scans the board rather than attempting work proportional
+to the coordinate gap.
+
+## A REGION IS A BOARD
+
+`within`, `ring`, `component`, `visible_from`, and `subset` return `SubGrid`. It borrows the root
+board, sorts and deduplicates its selected root cells, and gives the region its own local numbering.
+Steps leaving the region are absent, so a path searched on the region cannot wander beyond it.
+
+The root and region indices are both valid numbers, but they are not interchangeable. Use
+`to_root` and `of_root` to cross the boundary. `root_indices` and its clearer alias
+`indices_in_root` provide the region’s cells in root numbering for a root-owned `CellMap` or other
+root table.
 
 ```rust
-use spacewalk::{FullGrid, Grid, HexLayout, Pt};
+use spacewalk::{Adjacency, FullGrid, Grid, Movement, Sq};
 
-let g = FullGrid::hexagon(4);
-let layout = HexLayout::pointy(Pt::new(32.0, 32.0)).at(Pt::new(400.0, 300.0));
+let grid = FullGrid::square(16, 16, Adjacency::Eight);
+let movement = Movement::uniform(&grid, 10);
+let reach = grid
+    .reachable_from(Sq::new(4, 4), 30, &movement)
+    .unwrap();
+let region = grid.subset(reach.iter().map(|&(cell, _)| grid.at(cell)));
+let region_movement = Movement::uniform(&region, 10);
 
-for i in g.indices() {
-    let c = layout.center(g.coord(i));      // where to draw it
-    let outline = layout.corners(g.coord(i));  // and its six vertices
-    # let _ = (c, outline);
-}
+assert!(region.contains(Sq::new(4, 7)));
+assert!(region
+    .path_between(Sq::new(4, 4), Sq::new(4, 7), &region_movement)
+    .is_some());
+```
 
-// Which cell is under the mouse? Off the board is `None`, with no special case,
-// because `index_of` already returns an Option.
-let hovered = g.index_of(layout.hex_at(Pt::new(430.0, 310.0)));
+## THE CELL MAP: ONE VALUE PER CELL
+
+`CellMap<T>` is the crate’s guarded `Vec<T>` for per-cell data. It is sized from a `Grid`, does not
+hold the grid, and is indexed by `Idx` rather than by a hand-written cast.
+
+`CellMap::new` fills a map with one cloned value; `CellMap::from_fn` computes values from
+coordinates. `iter` and `iter_mut` expose indexed values, while `get` and `get_mut` provide checked
+access. `as_slice`, `as_mut_slice`, `into_vec`, `fill`, `len`, and `is_empty` cover ordinary vector
+interoperability.
+
+A map is positional. A map made for one board is stale after `filtered` or when used with a
+different board, even if the raw index is in range. Debug builds check the board identity; release
+builds remove that check. Build a fresh map for a fresh board.
+
+## SQUARES, HEXES, AND THE DRAWING DESK
+
+`Sq` is an integer square coordinate with `x` increasing east and `y` increasing downward.
+`Dir8` supplies eight compass-labelled directions, plus the orthogonal and diagonal subsets.
+`Adjacency::Four` pairs with Manhattan distance; `Adjacency::Eight` pairs with Chebyshev distance.
+`CornerRule` and `corner_gate` express strict, loose, or free diagonal corner-cutting as a game
+rule layered on top of the board geometry.
+
+`Hex` uses axial coordinates, and `Dir6` supplies its six directions. `Offset` converts between
+axial hexes and the `(column, row)` conventions used by tile-map files. `HexLayout` and `SqLayout`
+are presentation tools: they place cells on a screen, recover a cell beneath a pointer, and return
+corners for drawing. The public layout boundary uses `f32`; its internal calculations use `f64`.
+No floating-point value enters a cost, metric, or step table.
+
+```rust
+use spacewalk::{FullGrid, Grid, HexLayout, Offset, Pt};
+
+let map = FullGrid::hex_rect(20, 12, Offset::OddR);
+let layout = HexLayout::pointy(Pt::new(32.0, 32.0))
+    .at(Pt::new(400.0, 300.0));
+
+let hovered = map.index_of(layout.hex_at(Pt::new(430.0, 310.0)));
 assert!(hovered.is_some());
-assert_eq!(g.index_of(layout.hex_at(Pt::new(9000.0, 9000.0))), None);
+assert_eq!(map.index_of(layout.hex_at(Pt::new(9000.0, 9000.0))), None);
 ```
 
-Pointy-top and flat-top; `Offset` converts to the `(col, row)` a tilemap editor stores, which is
-what you need the moment you load a map someone else authored. `FullGrid::hex_rect` builds the board
-that file describes, in the same convention. This is the only floating point in the crate, and it
-is a one-way street: no float reaches a cost, so pathfinding stays integer and stays reproducible.
+## INDICES, IDENTITY, AND THE RECORD BOOK
 
-## What it does
+`Idx` is a dense `u32` address issued by one board. It is stable for that board’s lifetime and
+meaningless as a saved coordinate. Serialize coordinates, never indices.
 
-| | |
-|---|---|
-| `at(c)`, `index_of(c)` | a coordinate to an index — panicking, and `Option`, for when off the board is an answer |
-| `step_from(c, dir)` | one coordinate step, or `None` when either coordinate is off the board |
-| `coord(i)`, `coords_of(is)` | and back again, which is what you draw and what you save |
-| `step(i, dir)` | one cell along, respecting holes — the primitive everything is built from |
-| `neighbors(i)` | every neighbour, **with the direction that reaches it** |
-| `in_neighbors(j)` | every cell that can step *into* `j` — the graph is directed, so this differs |
-| `ray(i, dir)` | slide until the board runs out — rooks, bishops |
-| `run(i, dir, same)` | the unbroken line **both ways** through a cell — line-of-N, wall segments |
-| `offset(i, delta)` | a lattice hop that ignores what it flies over — knights, capture-by-jump |
-| `distance`, `within`, `ring` | attack range, blast radius — priced by the radius, board scan only when that's cheaper |
-| `within_cell(c, …)` | the same range query without manually converting the origin to an index |
-| `line`, `los`, `visible_from` | field of view: walls actually block sight |
-| `visible_from_cell(c, …)` | field of view from a coordinate, or `None` when the origin is off-board |
-| `component`, `is_connected` | islands: did the generated map split, does this wall seal the room |
-| `component_from(c, …)` | the same component query starting from a coordinate |
-| `subset(cells)` | any cells you name, as a board — the highlight you draw and search |
-| `to_root`, `of_root` | a region's index, as the board that owns the cells numbers it |
-| `root_indices()`, `indices_in_root()` | a region's cells in root numbering — a `SubGrid` borrows, so it cannot be stored |
-| `path`, `reachable`, `path_toward` | A\* and budget-bounded Dijkstra, over your cost closure |
-| `path_between`, `reachable_from`, `reaching_cell` | the coordinate-first forms of the path and reach queries |
-| `reaching(goal, …)` | who can reach *here* — a threat map, in one backward search |
-| `Movement::cell_cost`, `Movement::edge_cost` | price entered coordinates or directed edges without decoding `Step` indices |
-| `Path::cells(grid)` | turn a path's index sequence into coordinates for drawing or saving |
-| `center`, `hex_at`, `corners` | where a cell is on screen, and which cell the mouse is over |
+In debug builds an index carries a board identity and foreign indices are rejected when they are
+used. In release builds that identity is zero-sized and the check disappears. Equality, ordering,
+and hashing use the numeric slot in both profiles, so the check is a development aid rather than a
+runtime security barrier.
 
-Two distinctions carry their weight. `step` respects holes and `offset` does not — a rook cannot
-slide through a gap in the board, but a knight leaps one, and so does a capture-by-jump. And
-`neighbors` keeps the direction, which is what lets a draughts man move forward only.
+`FullGrid` and `Metric` are deliberately not serializable: the grid’s tables are derived and the
+metric contains function pointers. Save the board definition—dimensions, radius, adjacency, or the
+ordered cell list—and rebuild it. A `CellMap` serializes as a list in index order when `serde` is
+enabled; save it beside the ordered cells that give those values their meaning.
 
-## Nothing here is sized by a number you passed in
+## SAFETY CAPS AND FALLIBLE CONSTRUCTION
 
-Every allocation and every loop in this crate is bounded by the size of the board, never by a cost,
-a radius, or a coordinate you hand it. That is not decoration — it was learned the hard way.
+The crate refuses resource requests that could turn a bad map file into a machine-sized incident.
 
-Costs are summed into a total that **saturates** rather than wraps. Rust does not check integer
-overflow in release, and a wrapped total makes a longer path look cheaper than a short one, which
-destroys the invariant Dijkstra rests on: cells re-open forever, the heap grows without bound, and
-the process eats memory until the machine dies. In release only — the build a game ships.
+- `MAX_CELLS` is `2²⁴`, or 16,777,216 cells. `FullGrid` also bounds its cell-direction table.
+- `MAX_SIGHT` is 64 because the current field-of-view algorithm is naive raycasting with cubic
+  growth in the sight radius.
+- `FullGrid::new` panics on a disagreeing metric or capacity request. The shape constructors
+  `FullGrid::square`, `disc`, `hexagon`, `hex_rect`, and `RectGrid::new` also panic on invalid
+  dimensions or radii.
+- `FullGrid::try_new`, `try_square`, `try_disc`, `try_hexagon`, `try_hex_rect`, and
+  `RectGrid::try_new` return `GridError` for those recoverable construction failures.
 
-The same rule, everywhere: distances are computed in `i64` so they cannot wrap; `Coord::step`
-saturates, so a cell at `i32::MAX` cannot wrap onto a real cell on the far side of the world and
-forge an edge; `ray` is bounded by the board, because a wrapping coordinate makes the step table
-cyclic; a range query counts its offsets before building them and scans the board instead when that
-is cheaper; sight is capped, because raycasting is O(r³) and a big enough radius is a hang made of
-time rather than memory. Grids are capped at `MAX_CELLS`.
+These limits bound work and memory derived from a board, not the application’s terrain or pieces.
+They are especially important for maps loaded from outside the program.
 
-`tests/robust.rs` is one test per bug, and it runs in release, because debug's overflow checks mask
-exactly the bugs that only exist without them. Wide direction alphabets retain their reverse-edge
-identity, and sparse boards do not make line-of-sight work proportional to the coordinate gap.
+## A BARE-METAL PROGRAM
 
-## An index knows which board issued it
+The library is `#![no_std]` and requires `alloc`. Its one runtime dependency is `hashbrown`, used
+for coordinate lookup without importing the standard library. The optional `serde` feature is off
+by default and adds serialization derives to the plain-data types and `CellMap<T>` where `T` is
+serializable.
 
-`Idx` is a dense index, valid only within the board that issued it. `filtered` renumbers, a
-`SubGrid` numbers its own cells from zero, and a stale index would otherwise quietly address a
-*different cell*. No bounds check can find that: two boards of the same size number every cell in
-range for both.
+The current package requires Rust 1.88 or later and uses edition 2024. The continuous-integration
+configuration checks the host library with and without `serde`, the `thumbv7em-none-eabihf` target,
+the debug and release profiles, rustfmt, Clippy, and rustdoc.
 
-So an index carries its board, and a **debug build checks it**:
+## TEST RANGE
 
-```rust
-# use spacewalk::{Adjacency, FullGrid, Grid, Sq};
-let board = FullGrid::square(8, 8, Adjacency::Four);
-let dark = board.filtered(|c| (c.x + c.y) % 2 == 0);
-let light = board.filtered(|c| (c.x + c.y) % 2 == 1);
-assert_eq!(dark.len(), light.len());        // so no bound can tell them apart
+The `tests/` directory contains public-API missions for square tactics, checkers, hex capture,
+hex fields, three-dimensional chess, drawing and picking, field of view, directed threats,
+directional terrain, admissible A*, determinism, save/load, range costs, highlighted regions,
+identity checks, and robustness at hostile numeric limits.
 
-let cell = dark.at(Sq::new(2, 2));
-assert_eq!(dark.coord(cell), Sq::new(2, 2));
-
-// `light.coord(cell)` panics in debug: "issued by a different grid".
-// Shipped, it quietly answers Sq::new(3, 2).
-```
-
-In release the tag is zero-sized, the checks vanish, and an `Idx` is a bare `u32` again. Equality,
-ordering, and hashing compare the number alone in **both** profiles, so nothing you observe changes
-with the build — only whether you are told. It is a development aid, not a runtime guarantee:
-*serialize coordinates, never indices.*
-
-A subset makes this sharper than a filter does, because both numberings stay **live**: the region's
-index 0 and the board's index 0 are each valid and each a different cell. `to_root` and `of_root`
-are the bridge, and the only correct one.
-
-Two boards that number the same cells the same way share a tag and are interchangeable — which is
-what makes rebuilding from `cells()` restore the *same indices*, not merely an equivalent board.
-`Idx::get` reads the number out for a structure of your own; there is deliberately no way back in.
-
-## The metric must agree with the adjacency
-
-An eight-way board measured with Manhattan distance is the classic tactics bug: a unit can *step* to
-the enemy diagonally beside it, but measures it as two cells away and so cannot *attack* it.
-`Adjacency` picks both together, so there is no second knob to get wrong — and `FullGrid::new`
-checks the same thing per edge for a board you build yourself, so it panics rather than misbehaves;
-`FullGrid::try_new` reports it as `GridError::MetricDisagrees`.
-
-## The tests are the examples
-
-There is no `examples/` directory, on purpose: the acceptance tests **are** real games, built from
-nothing but the public API. They are the code you actually want to read before you write any — each
-one is a working thing, not a snippet. If a change to the core would make one of them impossible to
-write, the change is wrong.
-
-- [`square_tactics`](tests/square_tactics.rs) — turn-based grid tactics: four- and eight-way
-  movement, corner rules, terrain
-- [`checkers`](tests/checkers.rs) — dark squares only, forward-only men, jumps and chains
-- [`hex_capture`](tests/hex_capture.rs) — clone-and-jump capture on a holed hex board
-- [`hex_field`](tests/hex_field.rs) — a rectangular hex battlefield loaded from an authored map:
-  terrain in a `CellMap`, an island check, and five in a row along three axes
-- [`chess3d`](tests/chess3d.rs) — a coordinate this crate has never heard of, defined **in the test
-  file**, with no change to the crate. Start here if your board is an odd shape.
-- [`screen`](tests/screen.rs) — drawing the board and picking the cell under the mouse
-- [`fov`](tests/fov.rs) — walls cast shadows, and sight is symmetric
-- [`threat`](tests/threat.rs) — who can reach *this* cell, on a directed graph
-- [`directional`](tests/directional.rs) — rivers, conveyors, one-way ledges
-- [`admissible`](tests/admissible.rs) — A\* returns the *cheapest* path, not merely a path
-- [`determinism`](tests/determinism.rs) — the same question, asked twice, gets the same answer
-- [`save`](tests/save.rs) — what to serialize, and the one way to get a wrong answer out of this
-  crate without hearing about it
-- [`range_cost`](tests/range_cost.rs) — range queries priced by the radius, not the board, and the
-  memory bomb the fix must not ship
-- [`highlight`](tests/highlight.rs) — a turn's movement range and an attack, as boards you can
-  draw and then search
-- [`identity`](tests/identity.rs) — an index belongs to one board, and says so when it is handed
-  to another
-- [`robust`](tests/robust.rs) — one test per bug that could take a machine down
+The principal local launch sequence is:
 
 ```sh
-cargo test
-cargo test --release          # robust's bugs hide behind debug's overflow checks; range_cost times the build you ship
-cargo test --all-features     # adds serde
+cargo test --all-targets
+cargo test --all-features --all-targets
+cargo test --all-features --doc
+cargo test --release --all-features --all-targets
+cargo test --release --all-features --doc
+cargo fmt --all --check
+cargo clippy --all-features --all-targets
+RUSTDOCFLAGS=-Dwarnings cargo doc --no-deps --all-features
 ```
 
-Run both profiles. The release build is where the index check is gone, and every answer must be the
-same without it — only whether a mistake is reported may differ.
+For the bare-metal report, install the target and run:
 
-## Requirements
+```sh
+cargo build --target thumbv7em-none-eabihf
+cargo build --target thumbv7em-none-eabihf --features serde
+```
 
-- Rust 1.88 or later. The crate uses edition 2024 and let-chains.
-- **`#![no_std]`**, unconditionally, and it builds for `thumbv7em-none-eabihf`. Nothing here wants
-  an operating system, so `alloc` is the whole of what it asks for — and that is present wherever
-  `std` is. No feature to turn on, nothing an ordinary user does differently.
-- **One dependency:** `hashbrown`, the table `std`'s own `HashMap` is built from. The `serde`
-  feature is optional and off by default.
-- A\* and Dijkstra are the crate's own, in `src/search.rs`. A general graph library must key its
-  bookkeeping on whatever a node happens to be, so it reaches for a hash map; a board's cells are
-  numbered `0..len`, so here it is two vectors read by subscript. Roughly a fifth faster than the
-  library it replaced, and about a hundred and eighty lines.
-- `core` has no `f64::round`, `floor`, `cos`, or `sin`, so `src/float.rs` carries its own. The
-  hexagon corner angles were always twelve fixed numbers; the rounding is integer arithmetic once a
-  value is known to be finite. Both are checked against `std`'s over a few million values.
-
-## License
+## LICENSE
 
 [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE)
