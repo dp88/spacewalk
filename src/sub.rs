@@ -94,7 +94,8 @@ impl<'a, B: Grid> SubGrid<'a, B> {
         // The root's tag is mixed in so that two regions holding the same local index list, taken
         // from different boards, do not collide.
         let tag = Tag::of(
-            core::iter::once(u64::from(u32::MAX) + 1).chain(cells.iter().map(|&i| u64::from(i))),
+            core::iter::once((root_tag, u64::from(u32::MAX) + 1))
+                .chain(cells.iter().map(|&i| (root_tag, u64::from(i)))),
         );
         Self { root, cells, tag }
     }

@@ -386,12 +386,12 @@ impl Hasher for Fnv {
 /// In release builds this is a zero-sized type: every check below compiles to nothing, and an
 /// [`Idx`] is a bare `u32` again.
 #[cfg(debug_assertions)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Tag(u32);
 
 /// Which board's numbering an [`Idx`] belongs to. Zero-sized in release; see the debug definition.
 #[cfg(not(debug_assertions))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Tag;
 
 impl Tag {

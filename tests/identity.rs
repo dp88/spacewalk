@@ -101,6 +101,32 @@ fn a_regions_own_index_is_refused_by_its_root() {
 }
 
 #[test]
+fn regions_from_different_roots_are_not_interchangeable() {
+    let left = FullGrid::new(
+        [Sq::new(0, 0)],
+        &spacewalk::Dir8::ORTHO,
+        spacewalk::Metric::MANHATTAN,
+    );
+    let right = FullGrid::new(
+        [Sq::new(10, 0)],
+        &spacewalk::Dir8::ORTHO,
+        spacewalk::Metric::MANHATTAN,
+    );
+    let left_region = left.subset(left.indices());
+    let right_region = right.subset(right.indices());
+    let foreign = right_region.at(Sq::new(10, 0));
+
+    let boom = caught(|| {
+        left_region.coord(foreign);
+    });
+
+    if cfg!(debug_assertions) {
+        let msg = boom.expect("regions from different roots must not share an identity");
+        assert!(msg.contains("different grid"), "{msg}");
+    }
+}
+
+#[test]
 fn the_bridge_between_a_region_and_its_root_still_works_both_ways() {
     let g = FullGrid::square(8, 8, Adjacency::Four);
     let region = g.within(g.at(Sq::new(4, 4)), 0, 2);
