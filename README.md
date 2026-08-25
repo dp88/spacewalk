@@ -1,3 +1,5 @@
+![spacewalk banner](art/banner.webp)
+
 # spacewalk
 
 [![CI](https://github.com/dp88/spacewalk/actions/workflows/ci.yml/badge.svg)](https://github.com/dp88/spacewalk/actions/workflows/ci.yml)
