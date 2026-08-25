@@ -247,7 +247,8 @@ pub use sub::SubGrid;
 /// ```
 pub mod prelude {
     pub use crate::{
-        Adjacency, CellMap, Coord, Cost, Dir6, Dir8, FullGrid, Grid, Hex, HexLayout, Idx, Metric,
-        Movement, Offset, Orientation, Path, Pt, RectGrid, Sq, SqLayout, Step, SubGrid,
+        Adjacency, CellMap, Coord, CornerRule, Cost, Dir, Dir6, Dir8, FullGrid, Grid, Hex,
+        HexLayout, Idx, Lerp, MAX_CELLS, MAX_SIGHT, Metric, Movement, Offset, Orientation, Path,
+        Pt, RectGrid, Sq, SqLayout, Step, SubGrid, Tag, corner_gate,
     };
 }
