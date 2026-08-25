@@ -46,7 +46,7 @@
 use core::fmt;
 
 use crate::coord::{Coord, Idx};
-use crate::grid::{Grid, cost_ceiling};
+use crate::grid::{Dir, Grid, cost_ceiling};
 use alloc::vec::Vec;
 
 /// What a step costs.
@@ -192,6 +192,39 @@ impl<F> Movement<F> {
 }
 
 impl Movement<()> {
+    /// Price movement from the coordinate being entered.
+    ///
+    /// This is the convenient form for terrain and occupancy: return `None` when the destination
+    /// cannot be entered, or the cost of entering it otherwise. The callback receives coordinates,
+    /// so it does not need to decode [`Step::to`] itself.
+    #[must_use]
+    pub fn cell_cost<'a, B, G>(
+        g: &'a B,
+        cost: G,
+    ) -> Movement<impl Fn(Step<B::Cell>) -> Option<Cost> + 'a>
+    where
+        B: Grid + ?Sized + 'a,
+        G: Fn(B::Cell) -> Option<Cost> + 'a,
+    {
+        Movement::scan(g, move |s| cost(g.coord(s.to)))
+    }
+
+    /// Price movement from the two coordinates and direction involved.
+    ///
+    /// This is the convenient form for rivers, conveyors, one-way terrain, and other directional
+    /// rules. Return `None` when that edge is forbidden.
+    #[must_use]
+    pub fn edge_cost<'a, B, G>(
+        g: &'a B,
+        cost: G,
+    ) -> Movement<impl Fn(Step<B::Cell>) -> Option<Cost> + 'a>
+    where
+        B: Grid + ?Sized + 'a,
+        G: Fn(B::Cell, B::Cell, Dir<B>) -> Option<Cost> + 'a,
+    {
+        Movement::scan(g, move |s| cost(g.coord(s.from), g.coord(s.to), s.dir))
+    }
+
     /// Every step costs the same, and every cell is passable.
     ///
     /// The prototype's movement rules, and the right answer whenever the board itself is the only
@@ -513,5 +546,29 @@ mod tests {
 
         assert_eq!(g.path(top, bottom, &m).unwrap().cost(), 20, "down is fine");
         assert!(g.path(bottom, top, &m).is_none(), "up is not");
+    }
+
+    #[test]
+    fn coordinate_facing_movement_constructors_price_their_coordinates() {
+        let g = FullGrid::square(3, 1, Adjacency::Four);
+        let by_cell = Movement::cell_cost(&g, |cell| (cell != Sq::new(1, 0)).then_some(10));
+        assert!(
+            g.path_between(Sq::new(0, 0), Sq::new(2, 0), &by_cell)
+                .is_none()
+        );
+
+        let by_edge = Movement::edge_cost(&g, |from, to, dir| {
+            Some(if from.x == 0 && to.x == 1 && dir == Dir8::E {
+                1
+            } else {
+                10
+            })
+        });
+        assert_eq!(
+            g.path_between(Sq::new(0, 0), Sq::new(2, 0), &by_edge)
+                .unwrap()
+                .cost(),
+            11
+        );
     }
 }
