@@ -8,7 +8,7 @@
 //! Real sight needs a straight line in *coordinate* space, which is lattice-specific — so it lives
 //! on the [`Metric`], and the grid drives the walk one cell at a time.
 
-use spacewalk::{Adjacency, FullGrid, Grid, Hex, Idx, MAX_SIGHT, Sq};
+use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Hex, Idx, MAX_SIGHT, Metric, Sq};
 
 mod common;
 
@@ -73,6 +73,25 @@ fn a_line_reversed_is_the_reverse_of_the_line() {
     back.reverse();
 
     assert_eq!(there, back);
+}
+
+#[test]
+fn a_sparse_line_does_not_skip_a_real_intermediate_cell() {
+    let g = FullGrid::new(
+        [Sq::new(0, 0), Sq::new(500_000, 0), Sq::new(1_000_000, 0)],
+        &Dir8::ORTHO,
+        Metric::MANHATTAN,
+    );
+    let a = g.at(Sq::new(0, 0));
+    let middle = g.at(Sq::new(500_000, 0));
+    let b = g.at(Sq::new(1_000_000, 0));
+
+    let line: Vec<Sq> = g.line(a, b).into_iter().map(|i| g.coord(i)).collect();
+    assert_eq!(
+        line,
+        [Sq::new(0, 0), Sq::new(500_000, 0), Sq::new(1_000_000, 0)]
+    );
+    assert!(!g.los(a, b, |i| i == middle));
 }
 
 #[test]

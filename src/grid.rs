@@ -587,10 +587,29 @@ pub trait Grid {
         let (lo, hi) = if ordered { (a, b) } else { (b, a) };
         let (ca, cb) = (self.coord(lo), self.coord(hi));
 
-        // Bounded by the board. A line cannot touch more cells than exist, and on a sparse board
-        // the coordinate distance can hugely exceed the cell count — two cells a billion apart
-        // would otherwise walk a billion steps to visit two.
-        let n = self.distance(lo, hi).min(self.len() as u32).max(1);
+        // Dense boards can interpolate one lattice step at a time. On a sparse board the
+        // coordinate distance can hugely exceed the cell count — two cells a billion apart would
+        // otherwise walk a billion steps to visit two. In that case, locate the line's sampled
+        // positions by scanning the board instead. This keeps the answer exact without making work
+        // proportional to a coordinate a caller supplied.
+        let distance = self.distance(lo, hi);
+        if distance > self.len() as u32 {
+            let mut cells: Vec<(u32, Idx)> = self
+                .indices()
+                .filter_map(|j| {
+                    let at = self.distance(lo, j);
+                    (at <= distance && metric.lerp(ca, cb, at, distance) == Some(self.coord(j)))
+                        .then_some((at, j))
+                })
+                .collect();
+            cells.sort_unstable_by_key(|&(at, j)| (at, j));
+            if lo != a {
+                cells.reverse();
+            }
+            return cells.into_iter().map(|(_, j)| j).collect();
+        }
+
+        let n = distance.max(1);
 
         let mut cells: Vec<Idx> = (0..=n)
             .filter_map(|t| self.index_of(metric.lerp(ca, cb, t, n)?))
