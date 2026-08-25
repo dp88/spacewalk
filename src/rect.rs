@@ -10,7 +10,7 @@
 //! holes, a disc, a hex board, or a coordinate of your own.
 
 use crate::coord::{Coord, Dir8, Idx, Metric, Sq, Tag};
-use crate::full::{Adjacency, MAX_CELLS};
+use crate::full::{Adjacency, GridError, MAX_CELLS};
 use crate::grid::{Grid, same_grid, slot};
 
 /// A `w × h` rectangle of square cells, in row-major order, with no derived geometry stored.
@@ -72,19 +72,27 @@ impl RectGrid {
     /// than returning an answer.
     #[must_use]
     pub fn new(w: i32, h: i32, adj: Adjacency) -> Self {
-        assert!(w >= 0 && h >= 0, "a grid cannot be {w} x {h}");
-        assert!(
-            w as u64 * h as u64 <= MAX_CELLS,
-            "{w} x {h} is {} cells; a grid may hold at most {MAX_CELLS}",
-            w as u64 * h as u64,
-        );
+        Self::try_new(w, h, adj).unwrap_or_else(|error| panic!("{error}"))
+    }
 
-        Self {
+    /// Fallibly build a rectangle without allocating a stored board.
+    ///
+    /// Returns [`GridError`] for negative dimensions or a rectangle larger than [`MAX_CELLS`].
+    pub fn try_new(w: i32, h: i32, adj: Adjacency) -> Result<Self, GridError> {
+        if w < 0 || h < 0 {
+            return Err(GridError::InvalidDimensions { w, h });
+        }
+        let cells_count = w as u64 * h as u64;
+        if cells_count > MAX_CELLS {
+            return Err(GridError::TooManyCells { cells: cells_count });
+        }
+
+        Ok(Self {
             w,
             h,
             adj,
             tag: Tag::of((0..h).flat_map(move |y| (0..w).map(move |x| Sq::new(x, y)))),
-        }
+        })
     }
 
     /// Mint one of this grid's indices. The single door between a bare number and an [`Idx`].
@@ -230,5 +238,17 @@ mod tests {
 
             assert_eq!((a.steps(), a.cost()), (b.steps(), b.cost()), "{adj:?}");
         }
+    }
+
+    #[test]
+    fn fallible_constructor_reports_invalid_requests() {
+        assert!(matches!(
+            RectGrid::try_new(-1, 2, Adjacency::Four),
+            Err(GridError::InvalidDimensions { w: -1, h: 2 })
+        ));
+        assert!(matches!(
+            RectGrid::try_new(4097, 4097, Adjacency::Four),
+            Err(GridError::TooManyCells { cells: 16_785_409 })
+        ));
     }
 }

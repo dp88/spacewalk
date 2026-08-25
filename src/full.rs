@@ -9,6 +9,7 @@
 //! keeps the grid immutable, shareable, and out of your borrow checker's way: `&FullGrid` and
 //! `&mut your_state` are simply different objects.
 
+use core::fmt;
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
 
@@ -37,6 +38,61 @@ const NONE: u32 = u32::MAX;
 /// around half a gigabyte. No game board is anywhere near this. If you genuinely need a bigger
 /// world, you want a chunked one, not a bigger `FullGrid`.
 pub const MAX_CELLS: u64 = 1 << 24;
+
+/// Why a grid constructor could not build the requested board.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridError {
+    /// A rectangle had a negative side.
+    InvalidDimensions {
+        /// The requested width.
+        w: i32,
+        /// The requested height.
+        h: i32,
+    },
+    /// A radius was negative.
+    InvalidRadius {
+        /// The requested radius.
+        radius: i32,
+    },
+    /// The requested board or its conservative bounding box exceeds [`MAX_CELLS`].
+    TooManyCells {
+        /// The number of cells requested.
+        cells: u64,
+    },
+    /// The stored cell-direction table cannot be represented or allocated safely.
+    TooManyEdges {
+        /// The number of cells in the table.
+        cells: u64,
+        /// The number of directions in the table.
+        directions: u64,
+    },
+    /// A direction moves farther than one unit under the supplied metric.
+    MetricDisagrees {
+        /// The distance a direction actually spans.
+        span: u32,
+    },
+}
+
+impl fmt::Display for GridError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::InvalidDimensions { w, h } => write!(f, "a grid cannot be {w} x {h}"),
+            Self::InvalidRadius { radius } => write!(f, "radius must be >= 0, not {radius}"),
+            Self::TooManyCells { cells } => write!(
+                f,
+                "the requested board needs {cells} cells; a grid may hold at most {MAX_CELLS}",
+            ),
+            Self::TooManyEdges { cells, directions } => write!(
+                f,
+                "a {cells}-cell grid with {directions} directions has too many edge entries",
+            ),
+            Self::MetricDisagrees { span } => write!(
+                f,
+                "the metric disagrees with the directions: a step covers {span} units, but a +                 step must cover at most one",
+            ),
+        }
+    }
+}
 
 /// Which neighbours a square grid connects, and how it measures distance.
 ///
@@ -187,6 +243,19 @@ impl<C: Coord> FullGrid<C> {
     /// limit rather than being counted to exhaustion first.
     #[must_use]
     pub fn new(cells: impl IntoIterator<Item = C>, dirs: &[C::Dir], metric: Metric<C>) -> Self {
+        Self::try_new(cells, dirs, metric).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// Fallibly build a grid from any set of cells, direction alphabet, and distance metric.
+    ///
+    /// This has the same duplicate handling, ordering, and validation as [`FullGrid::new`], but
+    /// returns a [`GridError`] instead of panicking for invalid dimensions, oversized boards, or a
+    /// metric that disagrees with the direction alphabet. Allocation failure is not recoverable.
+    pub fn try_new(
+        cells: impl IntoIterator<Item = C>,
+        dirs: &[C::Dir],
+        metric: Metric<C>,
+    ) -> Result<Self, GridError> {
         let mut ordered = Vec::new();
         let mut index = HashMap::new();
         for c in cells {
@@ -197,20 +266,26 @@ impl<C: Coord> FullGrid<C> {
 
             // Checked as we go, not afterwards: a caller can hand us an unbounded iterator, and
             // counting it to completion before complaining is exactly the runaway we are stopping.
-            assert!(
-                ordered.len() as u64 <= MAX_CELLS,
-                "a grid may hold at most {MAX_CELLS} cells",
-            );
+            if ordered.len() as u64 > MAX_CELLS {
+                return Err(GridError::TooManyCells {
+                    cells: ordered.len() as u64,
+                });
+            }
         }
 
         let edge_count = ordered
             .len()
             .checked_mul(dirs.len())
-            .expect("a grid's cell-direction table is too large");
-        assert!(
-            edge_count <= u32::MAX as usize,
-            "a grid's cell-direction table has too many entries ({edge_count})"
-        );
+            .ok_or(GridError::TooManyEdges {
+                cells: ordered.len() as u64,
+                directions: dirs.len() as u64,
+            })?;
+        if edge_count > u32::MAX as usize {
+            return Err(GridError::TooManyEdges {
+                cells: ordered.len() as u64,
+                directions: dirs.len() as u64,
+            });
+        }
         let mut steps = Vec::with_capacity(edge_count);
         for (i, &c) in ordered.iter().enumerate() {
             for &d in dirs {
@@ -233,16 +308,9 @@ impl<C: Coord> FullGrid<C> {
                 // It costs one metric call per edge, in the loop that was walking the edges anyway.
                 if j != NONE {
                     let span = metric.distance(c, ordered[j as usize]);
-                    assert!(
-                        span <= 1,
-                        "a step from {c:?} to {:?} covers {span} under this metric, but a step is \
-                         one. The metric disagrees with the directions — the classic case is \
-                         eight-way movement measured with Manhattan distance, where a unit can step \
-                         onto the diagonal but is told it is two cells away. If your board has \
-                         genuine multi-cell steps (portals, jumps), give it a metric that returns \
-                         0: A* becomes Dijkstra, which is slower and still correct.",
-                        ordered[j as usize],
-                    );
+                    if span > 1 {
+                        return Err(GridError::MetricDisagrees { span });
+                    }
                 }
 
                 steps.push(j);
@@ -250,7 +318,7 @@ impl<C: Coord> FullGrid<C> {
         }
 
         let back = Back::of(&steps, ordered.len(), dirs.len());
-        Self {
+        Ok(Self {
             tag: Tag::of(ordered.iter()),
             cells: ordered,
             index,
@@ -258,7 +326,7 @@ impl<C: Coord> FullGrid<C> {
             steps,
             back,
             metric,
-        }
+        })
     }
 
     /// Mint one of this grid's indices. The single door between a raw table slot and an [`Idx`].
@@ -389,17 +457,25 @@ impl FullGrid<Sq> {
     /// an *empty* grid without complaint, and a large one used to try to allocate tens of gigabytes.
     #[must_use]
     pub fn square(w: i32, h: i32, adj: Adjacency) -> Self {
-        assert!(w >= 0 && h >= 0, "a grid cannot be {w} x {h}");
-        assert!(
-            w as u64 * h as u64 <= MAX_CELLS,
-            "{w} x {h} is {} cells; a grid may hold at most {MAX_CELLS}",
-            w as u64 * h as u64,
-        );
+        Self::try_square(w, h, adj).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// Fallibly build a square-cell rectangle.
+    ///
+    /// Returns [`GridError`] for negative dimensions or a rectangle larger than [`MAX_CELLS`].
+    pub fn try_square(w: i32, h: i32, adj: Adjacency) -> Result<Self, GridError> {
+        if w < 0 || h < 0 {
+            return Err(GridError::InvalidDimensions { w, h });
+        }
+        let cells_count = w as u64 * h as u64;
+        if cells_count > MAX_CELLS {
+            return Err(GridError::TooManyCells { cells: cells_count });
+        }
 
         let cells = (0..h).flat_map(move |y| (0..w).map(move |x| Sq::new(x, y)));
         match adj {
-            Adjacency::Four => Self::new(cells, &Dir8::ORTHO, Metric::MANHATTAN),
-            Adjacency::Eight => Self::new(cells, &Dir8::ALL, Metric::CHEBYSHEV),
+            Adjacency::Four => Self::try_new(cells, &Dir8::ORTHO, Metric::MANHATTAN),
+            Adjacency::Eight => Self::try_new(cells, &Dir8::ALL, Metric::CHEBYSHEV),
         }
     }
 
@@ -442,19 +518,27 @@ impl FullGrid<Sq> {
     /// rows to find out is itself the four-billion-iteration loop the guard exists to stop.
     #[must_use]
     pub fn disc(radius: i32, adj: Adjacency) -> Self {
-        assert!(radius >= 0, "radius must be >= 0, not {radius}");
+        Self::try_disc(radius, adj).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// Fallibly build an origin-centred disc of square cells.
+    ///
+    /// Returns [`GridError`] for a negative radius or when the disc's conservative bounding box
+    /// exceeds [`MAX_CELLS`].
+    pub fn try_disc(radius: i32, adj: Adjacency) -> Result<Self, GridError> {
+        if radius < 0 {
+            return Err(GridError::InvalidRadius { radius });
+        }
 
         // In `u64`, and not for show. The widest box a caller can name is `2 * i32::MAX + 1` cells
         // on a side, which squares to 8.6 billion short of `u64::MAX` — it fits, but only just. One
         // integer width narrower it wraps, the guard waves the radius through, and the loop below
         // walks four billion rows.
         let side = 2 * radius as u64 + 1;
-        assert!(
-            side * side <= MAX_CELLS,
-            "a disc of radius {radius} needs a {side} x {side} box, which is {} cells; a grid may \
-             hold at most {MAX_CELLS}",
-            side * side,
-        );
+        let cells_count = side * side;
+        if cells_count > MAX_CELLS {
+            return Err(GridError::TooManyCells { cells: cells_count });
+        }
 
         // The guard above caps `radius` at 2047, so `x * x + y * y` could not leave `i32`. It is
         // written in `i64` all the same, as `square_deltas` is: a reader should not have to
@@ -468,8 +552,8 @@ impl FullGrid<Sq> {
         });
 
         match adj {
-            Adjacency::Four => Self::new(cells, &Dir8::ORTHO, Metric::MANHATTAN),
-            Adjacency::Eight => Self::new(cells, &Dir8::ALL, Metric::CHEBYSHEV),
+            Adjacency::Four => Self::try_new(cells, &Dir8::ORTHO, Metric::MANHATTAN),
+            Adjacency::Eight => Self::try_new(cells, &Dir8::ALL, Metric::CHEBYSHEV),
         }
     }
 }
@@ -484,18 +568,26 @@ impl FullGrid<Hex> {
     /// billion, and in release that wraps and quietly returns a *malformed* hexagon.
     #[must_use]
     pub fn hexagon(radius: i32) -> Self {
-        assert!(radius >= 0, "radius must be >= 0, not {radius}");
+        Self::try_hexagon(radius).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// Fallibly build a centred hexagon.
+    ///
+    /// Returns [`GridError`] for a negative radius or a hexagon larger than [`MAX_CELLS`].
+    pub fn try_hexagon(radius: i32) -> Result<Self, GridError> {
+        if radius < 0 {
+            return Err(GridError::InvalidRadius { radius });
+        }
         let r = radius as u64;
-        assert!(
-            3 * r * (r + 1) < MAX_CELLS,
-            "a hexagon of radius {radius} is {} cells; a grid may hold at most {MAX_CELLS}",
-            3 * r * (r + 1) + 1,
-        );
+        let cells_count = 3 * r * (r + 1) + 1;
+        if cells_count > MAX_CELLS {
+            return Err(GridError::TooManyCells { cells: cells_count });
+        }
 
         let cells = (-radius..=radius).flat_map(move |q| {
             ((-radius).max(-q - radius)..=radius.min(-q + radius)).map(move |r| Hex::new(q, r))
         });
-        Self::new(cells, &Dir6::ALL, Metric::HEX)
+        Self::try_new(cells, &Dir6::ALL, Metric::HEX)
     }
 
     /// A `w × h` rectangular field of hex cells, in row-major order.
@@ -527,15 +619,23 @@ impl FullGrid<Hex> {
     /// hold. See [`FullGrid::square`], which guards the same two mistakes for the same reasons.
     #[must_use]
     pub fn hex_rect(w: i32, h: i32, offset: Offset) -> Self {
-        assert!(w >= 0 && h >= 0, "a grid cannot be {w} x {h}");
-        assert!(
-            w as u64 * h as u64 <= MAX_CELLS,
-            "{w} x {h} is {} cells; a grid may hold at most {MAX_CELLS}",
-            w as u64 * h as u64,
-        );
+        Self::try_hex_rect(w, h, offset).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// Fallibly build a rectangular field of hex cells.
+    ///
+    /// Returns [`GridError`] for negative dimensions or a rectangle larger than [`MAX_CELLS`].
+    pub fn try_hex_rect(w: i32, h: i32, offset: Offset) -> Result<Self, GridError> {
+        if w < 0 || h < 0 {
+            return Err(GridError::InvalidDimensions { w, h });
+        }
+        let cells_count = w as u64 * h as u64;
+        if cells_count > MAX_CELLS {
+            return Err(GridError::TooManyCells { cells: cells_count });
+        }
 
         let cells = (0..h).flat_map(move |row| (0..w).map(move |col| offset.to_hex(col, row)));
-        Self::new(cells, &Dir6::ALL, Metric::HEX)
+        Self::try_new(cells, &Dir6::ALL, Metric::HEX)
     }
 }
 
@@ -716,5 +816,33 @@ mod tests {
             g.indices().next(),
             "the first occurrence kept its place, so it is still cell zero"
         );
+    }
+
+    #[test]
+    fn fallible_constructors_report_invalid_requests() {
+        assert!(matches!(
+            FullGrid::<Sq>::try_square(-1, 2, Adjacency::Four),
+            Err(GridError::InvalidDimensions { w: -1, h: 2 })
+        ));
+        assert!(matches!(
+            FullGrid::<Sq>::try_disc(-1, Adjacency::Four),
+            Err(GridError::InvalidRadius { radius: -1 })
+        ));
+        assert!(matches!(
+            FullGrid::<Hex>::try_hexagon(-1),
+            Err(GridError::InvalidRadius { radius: -1 })
+        ));
+        assert!(matches!(
+            FullGrid::<Sq>::try_new(
+                [Sq::new(0, 0), Sq::new(1, 1)],
+                &Dir8::ALL,
+                Metric::MANHATTAN,
+            ),
+            Err(GridError::MetricDisagrees { span: 2 })
+        ));
+        assert!(matches!(
+            FullGrid::<Sq>::try_square(4097, 4097, Adjacency::Four),
+            Err(GridError::TooManyCells { cells: 16_785_409 })
+        ));
     }
 }
