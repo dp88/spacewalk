@@ -30,15 +30,16 @@ use spacewalk::{Adjacency, FullGrid, Grid, Movement, Sq};
 let g = FullGrid::square(8, 8, Adjacency::Four);
 let mud = vec![Sq::new(3, 3), Sq::new(3, 4)];          // your data, your types
 
-let walk = Movement::scan(&g, |s| {
-    Some(if mud.contains(&g.coord(s.to)) { 30 } else { 10 })
+let walk = Movement::cell_cost(&g, |cell| {
+    Some(if mud.contains(&cell) { 30 } else { 10 })
 });
 
-let from = g.at(Sq::new(0, 0));
-let to   = g.at(Sq::new(7, 7));
-let path = g.path(from, to, &walk).unwrap();
+let path = g
+    .path_between(Sq::new(0, 0), Sq::new(7, 7), &walk)
+    .unwrap();
 
 assert_eq!(path.len(), 14);                            // fourteen orthogonal steps
+assert_eq!(path.cells(&g).count(), 15);                 // coordinates, including the start
 ```
 
 That keeps the grid immutable and shareable, and keeps it out of your borrow checker's way:
@@ -55,10 +56,18 @@ let mut mud = CellMap::new(&g, false);
 
 mud[g.at(Sq::new(3, 3))] = true;
 assert_eq!(mud.iter().filter(|&(_, &m)| m).count(), 1);
+assert_eq!(mud.as_slice().len(), g.len());
+
+for (_, wet) in mud.iter_mut() {
+    *wet = false;
+}
+assert!(mud.get(g.at(Sq::new(3, 3))).is_some());
 ```
 
 It borrows the grid to measure itself and does not hold one, so those are still two objects. It
-goes stale exactly as an `Idx` does: build a fresh one after `filtered`.
+goes stale exactly as an `Idx` does: build a fresh one after `filtered`. `get` and `get_mut` are
+the checked alternatives to indexing, while `as_slice`, `as_mut_slice`, `iter_mut`, `fill`, and
+`into_vec` make the map fit ordinary collection APIs.
 
 ## A region of a board is a board
 
@@ -73,18 +82,19 @@ you then reason over.
 ```rust
 # use spacewalk::{Adjacency, FullGrid, Grid, Movement, Sq};
 let g = FullGrid::square(16, 16, Adjacency::Eight);
-let unit = g.at(Sq::new(4, 4));
-let walk = Movement::scan(&g, |_| Some(10));
+let walk = Movement::uniform(&g, 10);
 
 // Where can it go this turn? The cells, with what reaching each one costs.
-let budget: Vec<_> = g.reachable(unit, 30, &walk);
+let budget: Vec<_> = g.reachable_from(Sq::new(4, 4), 30, &walk).unwrap();
 
 // As a board: now a route inside the highlight cannot wander outside it.
-let range = g.subset(budget.iter().map(|&(i, _)| i));
-let far = range.at(Sq::new(4, 7));
+let range = g.subset(budget.iter().map(|&(c, _)| g.at(c)));
+let range_walk = Movement::uniform(&range, 10);
 
 assert!(range.contains(Sq::new(4, 7)));
-assert!(range.path(range.at(Sq::new(4, 4)), far, &walk).is_some());
+assert!(range
+    .path_between(Sq::new(4, 4), Sq::new(4, 7), &range_walk)
+    .is_some());
 ```
 
 `within`, `ring`, `component` and `visible_from` hand one back directly; `subset` makes one from
@@ -99,20 +109,18 @@ downstream is cheap, upstream is dear.
 ```rust
 # use spacewalk::{Adjacency, Dir8, FullGrid, Grid, Movement, Sq};
 # let g = FullGrid::square(8, 8, Adjacency::Four);
-let wall  = g.at(Sq::new(4, 4));
-let river = g.at(Sq::new(2, 2));
-
-let walk = Movement::scan(&g, |s| match s.to {
-    t if t == wall  => None,                                          // impassable
-    t if t == river => Some(if s.dir == Dir8::S { 1 } else { 50 }),   // the current runs south
-    _ => Some(10),                                                    // open ground
+let walk = Movement::edge_cost(&g, |_, to, dir| {
+    if to == Sq::new(4, 4) {
+        None                                                        // impassable
+    } else if to == Sq::new(2, 2) {
+        Some(if dir == Dir8::S { 1 } else { 50 })                  // the current runs south
+    } else {
+        Some(10)                                                   // open ground
+    }
 });
 
-let above = g.at(Sq::new(2, 1));
-let below = g.at(Sq::new(2, 3));
-
-assert_eq!(g.path(above, below, &walk).unwrap().cost(), 11);   // downstream, through the river
-assert_eq!(g.path(below, above, &walk).unwrap().cost(), 40);   // upstream, cheaper to go around
+assert_eq!(g.path_between(Sq::new(2, 1), Sq::new(2, 3), &walk).unwrap().cost(), 11);
+assert_eq!(g.path_between(Sq::new(2, 3), Sq::new(2, 1), &walk).unwrap().cost(), 40);
 ```
 
 A conveyor belt, and a ledge you can drop off but not climb back up, are the same shape. One
@@ -135,6 +143,18 @@ less its gaps.
 A game with a genuinely different geometry implements `Coord`, which is three items: an associated
 direction type, the list of directions, and where one step lands. `tests/chess3d.rs` builds a
 three-layer chess board that way, in the test file, with no change to this crate.
+
+The constructors also have fallible forms for dimensions and board definitions that come from
+outside the program: `try_square`, `try_disc`, `try_hexagon`, `try_hex_rect`, `RectGrid::try_new`,
+and `FullGrid::try_new` return `GridError`. The original constructors remain convenient panic-on-
+invalid-input wrappers. `Movement::try_scan` and `Movement::try_uniform` do the same for costs that
+could overflow a path total, returning `MovementError`.
+
+For ordinary application code, coordinate-first helpers keep dense indices at the boundary:
+`step_from`, `within_cell`, `visible_from_cell`, `component_from`, `path_between`,
+`reachable_from`, and `reaching_cell` accept coordinates and return coordinates or a `SubGrid` as
+appropriate. The index-based methods remain available when a `CellMap`, custom array, or hot loop
+needs them.
 
 ## Drawing it, and clicking on it
 
@@ -169,6 +189,7 @@ is a one-way street: no float reaches a cost, so pathfinding stays integer and s
 | | |
 |---|---|
 | `at(c)`, `index_of(c)` | a coordinate to an index — panicking, and `Option`, for when off the board is an answer |
+| `step_from(c, dir)` | one coordinate step, or `None` when either coordinate is off the board |
 | `coord(i)`, `coords_of(is)` | and back again, which is what you draw and what you save |
 | `step(i, dir)` | one cell along, respecting holes — the primitive everything is built from |
 | `neighbors(i)` | every neighbour, **with the direction that reaches it** |
@@ -177,13 +198,19 @@ is a one-way street: no float reaches a cost, so pathfinding stays integer and s
 | `run(i, dir, same)` | the unbroken line **both ways** through a cell — line-of-N, wall segments |
 | `offset(i, delta)` | a lattice hop that ignores what it flies over — knights, capture-by-jump |
 | `distance`, `within`, `ring` | attack range, blast radius — priced by the radius, board scan only when that's cheaper |
+| `within_cell(c, …)` | the same range query without manually converting the origin to an index |
 | `line`, `los`, `visible_from` | field of view: walls actually block sight |
+| `visible_from_cell(c, …)` | field of view from a coordinate, or `None` when the origin is off-board |
 | `component`, `is_connected` | islands: did the generated map split, does this wall seal the room |
+| `component_from(c, …)` | the same component query starting from a coordinate |
 | `subset(cells)` | any cells you name, as a board — the highlight you draw and search |
 | `to_root`, `of_root` | a region's index, as the board that owns the cells numbers it |
-| `root_indices()` | a region as plain cells you can keep — a `SubGrid` borrows, so it cannot be stored |
+| `root_indices()`, `indices_in_root()` | a region's cells in root numbering — a `SubGrid` borrows, so it cannot be stored |
 | `path`, `reachable`, `path_toward` | A\* and budget-bounded Dijkstra, over your cost closure |
+| `path_between`, `reachable_from`, `reaching_cell` | the coordinate-first forms of the path and reach queries |
 | `reaching(goal, …)` | who can reach *here* — a threat map, in one backward search |
+| `Movement::cell_cost`, `Movement::edge_cost` | price entered coordinates or directed edges without decoding `Step` indices |
+| `Path::cells(grid)` | turn a path's index sequence into coordinates for drawing or saving |
 | `center`, `hex_at`, `corners` | where a cell is on screen, and which cell the mouse is over |
 
 Two distinctions carry their weight. `step` respects holes and `offset` does not — a rook cannot
@@ -208,7 +235,8 @@ is cheaper; sight is capped, because raycasting is O(r³) and a big enough radiu
 time rather than memory. Grids are capped at `MAX_CELLS`.
 
 `tests/robust.rs` is one test per bug, and it runs in release, because debug's overflow checks mask
-exactly the bugs that only exist without them.
+exactly the bugs that only exist without them. Wide direction alphabets retain their reverse-edge
+identity, and sparse boards do not make line-of-sight work proportional to the coordinate gap.
 
 ## An index knows which board issued it
 
@@ -251,7 +279,8 @@ what makes rebuilding from `cells()` restore the *same indices*, not merely an e
 An eight-way board measured with Manhattan distance is the classic tactics bug: a unit can *step* to
 the enemy diagonally beside it, but measures it as two cells away and so cannot *attack* it.
 `Adjacency` picks both together, so there is no second knob to get wrong — and `FullGrid::new`
-checks the same thing per edge for a board you build yourself, so it panics rather than misbehaves.
+checks the same thing per edge for a board you build yourself, so it panics rather than misbehaves;
+`FullGrid::try_new` reports it as `GridError::MetricDisagrees`.
 
 ## The tests are the examples
 
