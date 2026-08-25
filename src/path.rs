@@ -62,6 +62,37 @@ use alloc::vec::Vec;
 /// unchecked way, and why you probably do not want it.
 pub type Cost = u32;
 
+/// Why a movement constructor could not build its cost model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovementError {
+    /// A step costs more than a path on this board can safely accumulate.
+    CostTooHigh {
+        /// The largest cost returned by the movement callback.
+        cost: Cost,
+        /// The largest safe cost for this board.
+        ceiling: Cost,
+        /// The number of cells on the board.
+        cells: usize,
+    },
+}
+
+impl fmt::Display for MovementError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::CostTooHigh {
+                cost,
+                ceiling,
+                cells,
+            } => write!(
+                f,
+                "a step costs {cost}, but on a board of {cells} cells no step may cost more than \
+                 {ceiling} without overflowing Cost ({})",
+                Cost::MAX,
+            ),
+        }
+    }
+}
+
 /// One step: leaving `from`, entering `to`, travelling in `dir`.
 ///
 /// `dir` is handed to you rather than derived, so a cost function never has to work out which way
@@ -130,6 +161,17 @@ impl<F> Movement<F> {
     where
         F: Fn(Step<B::Cell>) -> Option<Cost>,
     {
+        Self::try_scan(g, enter).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// Fallibly scan every edge on the board to find the cheapest legal step.
+    ///
+    /// This has the same measurement and validation as [`Movement::scan`], but returns a
+    /// [`MovementError`] when a cost could make a path total overflow [`Cost`].
+    pub fn try_scan<B: Grid + ?Sized>(g: &B, enter: F) -> Result<Self, MovementError>
+    where
+        F: Fn(Step<B::Cell>) -> Option<Cost>,
+    {
         let ceiling = cost_ceiling(g.len());
         let mut min_step = Cost::MAX;
         let mut max_step = 0;
@@ -144,19 +186,19 @@ impl<F> Movement<F> {
             }
         }
         if has_step {
-            assert!(
-                max_step <= ceiling,
-                "a step costs {max_step}, but on a board of {} cells no step may cost more than \
-                 {ceiling} or a path's total could overflow Cost ({}). Scale your costs down.",
-                g.len(),
-                Cost::MAX,
-            );
+            if max_step > ceiling {
+                return Err(MovementError::CostTooHigh {
+                    cost: max_step,
+                    ceiling,
+                    cells: g.len(),
+                });
+            }
         }
 
-        Self {
+        Ok(Self {
             enter,
             min_step: if has_step { min_step } else { 0 },
-        }
+        })
     }
 
     /// Promise the cheapest step yourself, and skip the scan.
@@ -255,16 +297,27 @@ impl Movement<()> {
         g: &B,
         cost: Cost,
     ) -> Movement<impl Fn(Step<B::Cell>) -> Option<Cost>> {
-        let ceiling = cost_ceiling(g.len());
-        assert!(
-            cost <= ceiling,
-            "a step costs {cost}, but on a board of {} cells no step may cost more than {ceiling} \
-             or a path's total could overflow Cost ({}). Scale your costs down.",
-            g.len(),
-            Cost::MAX,
-        );
+        Self::try_uniform(g, cost).unwrap_or_else(|error| panic!("{error}"))
+    }
 
-        Movement::new(move |_| Some(cost), cost)
+    /// Fallibly build uniform movement without scanning the board.
+    ///
+    /// Returns [`MovementError`] if `cost` is too large for a path on this board to accumulate
+    /// safely.
+    pub fn try_uniform<B: Grid + ?Sized>(
+        g: &B,
+        cost: Cost,
+    ) -> Result<Movement<impl Fn(Step<B::Cell>) -> Option<Cost>>, MovementError> {
+        let ceiling = cost_ceiling(g.len());
+        if cost > ceiling {
+            return Err(MovementError::CostTooHigh {
+                cost,
+                ceiling,
+                cells: g.len(),
+            });
+        }
+
+        Ok(Movement::new(move |_| Some(cost), cost))
     }
 }
 
@@ -546,6 +599,26 @@ mod tests {
 
         assert_eq!(g.path(top, bottom, &m).unwrap().cost(), 20, "down is fine");
         assert!(g.path(bottom, top, &m).is_none(), "up is not");
+    }
+
+    #[test]
+    fn fallible_movement_constructors_report_overflowing_costs() {
+        let g = FullGrid::square(3, 1, Adjacency::Four);
+        let cost = Cost::MAX / 2 + 1;
+        let want = MovementError::CostTooHigh {
+            cost,
+            ceiling: Cost::MAX / 2,
+            cells: 3,
+        };
+
+        assert!(matches!(
+            Movement::try_scan(&g, |_| Some(cost)),
+            Err(error) if error == want
+        ));
+        assert!(matches!(
+            Movement::try_uniform(&g, cost),
+            Err(error) if error == want
+        ));
     }
 
     #[test]

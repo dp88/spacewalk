@@ -227,7 +227,7 @@ pub use coord::{Coord, Dir6, Dir8, Hex, Idx, Lerp, Metric, Sq, Tag};
 pub use full::{Adjacency, FullGrid, GridError, MAX_CELLS};
 pub use grid::{Dir, Grid, MAX_SIGHT};
 pub use layout::{HexLayout, Offset, Orientation, Pt, SqLayout};
-pub use path::{Cost, Movement, Path, Step};
+pub use path::{Cost, Movement, MovementError, Path, Step};
 pub use rect::RectGrid;
 pub use square::{CornerRule, corner_gate};
 pub use sub::SubGrid;
@@ -248,7 +248,7 @@ pub use sub::SubGrid;
 pub mod prelude {
     pub use crate::{
         Adjacency, CellMap, Coord, CornerRule, Cost, Dir, Dir6, Dir8, FullGrid, Grid, Hex,
-        HexLayout, Idx, Lerp, MAX_CELLS, MAX_SIGHT, Metric, Movement, Offset, Orientation, Path,
-        Pt, RectGrid, Sq, SqLayout, Step, SubGrid, Tag, corner_gate,
+        HexLayout, Idx, Lerp, MAX_CELLS, MAX_SIGHT, Metric, Movement, MovementError, Offset,
+        Orientation, Path, Pt, RectGrid, Sq, SqLayout, Step, SubGrid, Tag, corner_gate,
     };
 }
