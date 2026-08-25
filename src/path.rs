@@ -272,6 +272,15 @@ impl Path {
         &self.steps
     }
 
+    /// Every coordinate walked through, starting with the one you set out from.
+    ///
+    /// The path and the grid must belong together. In a debug build, passing a different board is
+    /// rejected by the same index-identity check used by [`Grid`](crate::Grid) itself.
+    #[must_use]
+    pub fn cells<'a, B: Grid + ?Sized>(&'a self, g: &'a B) -> impl Iterator<Item = B::Cell> + 'a {
+        self.steps.iter().copied().map(move |i| g.coord(i))
+    }
+
     /// What walking it costs. Entering cells only — standing still is free.
     #[must_use]
     pub fn cost(&self) -> Cost {

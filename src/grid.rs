@@ -266,6 +266,14 @@ pub trait Grid {
         }
     }
 
+    /// The cell one step from a coordinate, or `None` if either the coordinate or the destination
+    /// is not on this board.
+    #[must_use]
+    fn step_from(&self, c: Self::Cell, d: Dir<Self>) -> Option<Self::Cell> {
+        let i = self.index_of(c)?;
+        self.step(i, d).map(|j| self.coord(j))
+    }
+
     /// Every cell index, in order. The usual way to sweep a board.
     fn indices(&self) -> impl Iterator<Item = Idx> {
         let tag = self.tag();
@@ -338,6 +346,12 @@ pub trait Grid {
     /// ```
     fn subset(&self, cells: impl IntoIterator<Item = Idx>) -> SubGrid<'_, Self::Root> {
         SubGrid::of(self.root(), cells.into_iter().map(|i| self.to_root(i)))
+    }
+
+    /// The cells within a coordinate range, or `None` if the origin is not on this board.
+    #[must_use]
+    fn within_cell(&self, c: Self::Cell, min: u32, max: u32) -> Option<SubGrid<'_, Self::Root>> {
+        self.index_of(c).map(|i| self.within(i, min, max))
     }
 
     // -- geometry ------------------------------------------------------------------------------
@@ -686,6 +700,17 @@ pub trait Grid {
         self.subset(seen)
     }
 
+    /// The cells visible from a coordinate, or `None` if the origin is not on this board.
+    #[must_use]
+    fn visible_from_cell(
+        &self,
+        c: Self::Cell,
+        r: u32,
+        blocks: impl Fn(Idx) -> bool,
+    ) -> Option<SubGrid<'_, Self::Root>> {
+        self.index_of(c).map(|i| self.visible_from(i, r, blocks))
+    }
+
     // -- connectivity --------------------------------------------------------------------------
 
     /// Every cell **reachable from** `i` through cells that pass `passable`, `i` included.
@@ -744,6 +769,16 @@ pub trait Grid {
         self.subset(self.indices().filter(|&j| seen[j.raw() as usize]))
     }
 
+    /// The component containing a coordinate, or `None` if the coordinate is not on this board.
+    #[must_use]
+    fn component_from(
+        &self,
+        c: Self::Cell,
+        passable: impl Fn(Idx) -> bool,
+    ) -> Option<SubGrid<'_, Self::Root>> {
+        self.index_of(c).map(|i| self.component(i, passable))
+    }
+
     /// Whether the passable cells are one piece: every one of them reachable from the first.
     ///
     /// The island check. Read it precisely, because on a directed board the reading matters: this
@@ -797,6 +832,19 @@ pub trait Grid {
         crate::search::find(self, start, goal, m)
     }
 
+    /// The cheapest path between two coordinates, or `None` if either coordinate is off the board
+    /// or no route exists.
+    #[must_use]
+    fn path_between<F>(&self, start: Self::Cell, goal: Self::Cell, m: &Movement<F>) -> Option<Path>
+    where
+        F: Fn(Step<Self::Cell>) -> Option<Cost>,
+    {
+        let (Some(start), Some(goal)) = (self.index_of(start), self.index_of(goal)) else {
+            return None;
+        };
+        self.path(start, goal, m)
+    }
+
     /// Every cell reachable from `start` for no more than `budget`, and what reaching it costs.
     ///
     /// Cheapest first, and `start` itself comes back at cost 0. The search stops as soon as the
@@ -827,6 +875,27 @@ pub trait Grid {
         F: Fn(Step<Self::Cell>) -> Option<Cost>,
     {
         crate::search::reachable(self, start, budget, m)
+    }
+
+    /// Every coordinate reachable from `start` for no more than `budget`, with its cost, or `None`
+    /// if `start` is off the board.
+    #[must_use]
+    fn reachable_from<F>(
+        &self,
+        start: Self::Cell,
+        budget: Cost,
+        m: &Movement<F>,
+    ) -> Option<Vec<(Self::Cell, Cost)>>
+    where
+        F: Fn(Step<Self::Cell>) -> Option<Cost>,
+    {
+        let start = self.index_of(start)?;
+        Some(
+            self.reachable(start, budget, m)
+                .into_iter()
+                .map(|(i, cost)| (self.coord(i), cost))
+                .collect(),
+        )
     }
 
     /// The reachable cell that lands closest to `target`, and the path to it.
@@ -883,6 +952,27 @@ pub trait Grid {
     {
         crate::search::reaching(self, goal, budget, m)
     }
+
+    /// Every coordinate that can reach `goal` for no more than `budget`, with its cost, or `None`
+    /// if `goal` is off the board.
+    #[must_use]
+    fn reaching_cell<F>(
+        &self,
+        goal: Self::Cell,
+        budget: Cost,
+        m: &Movement<F>,
+    ) -> Option<Vec<(Self::Cell, Cost)>>
+    where
+        F: Fn(Step<Self::Cell>) -> Option<Cost>,
+    {
+        let goal = self.index_of(goal)?;
+        Some(
+            self.reaching(goal, budget, m)
+                .into_iter()
+                .map(|(i, cost)| (self.coord(i), cost))
+                .collect(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -890,6 +980,7 @@ mod tests {
     use crate::coord::{Dir8, Hex, Metric, Sq};
     use crate::full::{Adjacency, FullGrid};
     use crate::grid::Grid;
+    use crate::path::Movement;
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -1041,5 +1132,48 @@ mod tests {
         let four = FullGrid::square(7, 7, Adjacency::Four);
         let j = four.at(mid);
         assert_eq!(four.within(j, 1, 2).len(), 12, "a diamond");
+    }
+
+    #[test]
+    fn coordinate_facing_helpers_cover_the_common_queries() {
+        let g = FullGrid::square(5, 5, Adjacency::Four);
+        let movement = Movement::uniform(&g, 10);
+
+        assert_eq!(g.step_from(Sq::new(1, 1), Dir8::E), Some(Sq::new(2, 1)));
+        assert_eq!(g.step_from(Sq::new(-1, 1), Dir8::E), None);
+
+        let path = g
+            .path_between(Sq::new(0, 0), Sq::new(2, 0), &movement)
+            .unwrap();
+        assert_eq!(
+            path.cells(&g).collect::<Vec<_>>(),
+            vec![Sq::new(0, 0), Sq::new(1, 0), Sq::new(2, 0)]
+        );
+
+        assert_eq!(
+            g.reachable_from(Sq::new(2, 2), 10, &movement)
+                .unwrap()
+                .len(),
+            5
+        );
+        assert_eq!(
+            g.reaching_cell(Sq::new(2, 2), 0, &movement).unwrap().len(),
+            1
+        );
+        assert!(
+            g.within_cell(Sq::new(2, 2), 0, 1)
+                .unwrap()
+                .contains(Sq::new(2, 2))
+        );
+        assert!(
+            g.component_from(Sq::new(2, 2), |_| true)
+                .unwrap()
+                .contains(Sq::new(2, 2))
+        );
+        assert!(
+            g.visible_from_cell(Sq::new(2, 2), 1, |_| false)
+                .unwrap()
+                .contains(Sq::new(2, 2))
+        );
     }
 }
