@@ -119,6 +119,34 @@ impl<T> CellMap<T> {
             .map(move |(i, v)| (Idx::new(tag, i as u32), v))
     }
 
+    /// Every cell and its mutable value, in index order.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (Idx, &mut T)> {
+        let tag = self.tag.unwrap_or(Tag::ANY);
+        #[allow(clippy::cast_possible_truncation)]
+        self.of
+            .iter_mut()
+            .enumerate()
+            .map(move |(i, v)| (Idx::new(tag, i as u32), v))
+    }
+
+    /// The values in index order, for APIs that work with slices.
+    #[must_use]
+    pub fn as_slice(&self) -> &[T] {
+        &self.of
+    }
+
+    /// The values in index order, for APIs that work with mutable slices.
+    #[must_use]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.of
+    }
+
+    /// Take ownership of the values in index order.
+    #[must_use]
+    pub fn into_vec(self) -> Vec<T> {
+        self.of
+    }
+
     /// How many cells the map covers — the [`Grid::len`] it was built from.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -131,6 +159,43 @@ impl<T> CellMap<T> {
         self.of.is_empty()
     }
 
+    /// Fill every cell with `value`.
+    pub fn fill(&mut self, value: T)
+    where
+        T: Clone,
+    {
+        self.of.fill(value);
+    }
+
+    /// Look up a value without panicking when the raw slot is past the end.
+    ///
+    /// As with indexing, using an index issued by a different grid is rejected in debug builds;
+    /// a bounds check cannot detect that mistake when the two maps are the same size.
+    #[must_use]
+    pub fn get(&self, i: Idx) -> Option<&T> {
+        self.check_tag(i);
+        self.of.get(i.raw() as usize)
+    }
+
+    /// Mutably look up a value without panicking when the raw slot is past the end.
+    ///
+    /// As with indexing, using an index issued by a different grid is rejected in debug builds;
+    /// a bounds check cannot detect that mistake when the two maps are the same size.
+    #[must_use]
+    pub fn get_mut(&mut self, i: Idx) -> Option<&mut T> {
+        self.check_tag(i);
+        self.of.get_mut(i.raw() as usize)
+    }
+
+    fn check_tag(&self, i: Idx) {
+        debug_assert!(
+            self.tag.is_none_or(|t| t.agrees(i.tag())),
+            "cell {i} was issued by a different grid than the one this CellMap was built from \
+             (a map is positional, and this index is in range for both, so nothing else can \
+             catch it)",
+        );
+    }
+
     /// Panics with something readable if `i` does not address this map.
     ///
     /// Two failures. Past the end is the obvious one. Issued by a different board is the one that
@@ -138,12 +203,7 @@ impl<T> CellMap<T> {
     /// board's terrain, read with another board's index, in range and wrong.
     #[track_caller]
     fn slot(&self, i: Idx) -> usize {
-        debug_assert!(
-            self.tag.is_none_or(|t| t.agrees(i.tag())),
-            "cell {i} was issued by a different grid than the one this CellMap was built from \
-             (a map is positional, and this index is in range for both, so nothing else can \
-             catch it)",
-        );
+        self.check_tag(i);
         assert!(
             (i.raw() as usize) < self.of.len(),
             "cell {i} is not in this CellMap, which covers {} cells (a map is positional, so \
@@ -205,5 +265,28 @@ mod tests {
         assert_eq!(map.len(), 6);
         let stale = full.at(Sq::new(2, 2));
         assert!(std::panic::catch_unwind(|| map[stale]).is_err());
+    }
+
+    #[test]
+    fn a_map_supports_checked_access_and_slice_interop() {
+        let g = FullGrid::square(3, 1, Adjacency::Four);
+        let mut map = CellMap::from_fn(&g, |c: Sq| c.x);
+
+        assert_eq!(map.get(g.at(Sq::new(1, 0))), Some(&1));
+        assert_eq!(map.get(Idx::new(Tag::ANY, 3)), None);
+        for (_, value) in map.iter_mut() {
+            *value += 10;
+        }
+        assert_eq!(map.as_slice(), &[10, 11, 12]);
+        map.as_mut_slice()[1] = 99;
+        assert_eq!(map.into_vec(), vec![10, 99, 12]);
+    }
+
+    #[test]
+    fn fill_replaces_every_value() {
+        let g = FullGrid::square(2, 2, Adjacency::Four);
+        let mut map = CellMap::new(&g, false);
+        map.fill(true);
+        assert!(map.iter().all(|(_, value)| *value));
     }
 }
