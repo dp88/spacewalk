@@ -181,7 +181,7 @@ fn a_wide_direction_alphabet_keeps_reverse_edges_correct() {
         const DIRS: &'static [WideDir] = &DIRS;
 
         fn step(self, d: WideDir) -> Self {
-            (d.0 == 256).then_some(Self(self.0 + 1)).unwrap_or(self)
+            if d.0 == 256 { Self(self.0 + 1) } else { self }
         }
     }
 

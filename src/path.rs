@@ -185,14 +185,12 @@ impl<F> Movement<F> {
                 }
             }
         }
-        if has_step {
-            if max_step > ceiling {
-                return Err(MovementError::CostTooHigh {
-                    cost: max_step,
-                    ceiling,
-                    cells: g.len(),
-                });
-            }
+        if has_step && max_step > ceiling {
+            return Err(MovementError::CostTooHigh {
+                cost: max_step,
+                ceiling,
+                cells: g.len(),
+            });
         }
 
         Ok(Self {
@@ -304,6 +302,7 @@ impl Movement<()> {
     ///
     /// Returns [`MovementError`] if `cost` is too large for a path on this board to accumulate
     /// safely.
+    #[allow(clippy::type_complexity)]
     pub fn try_uniform<B: Grid + ?Sized>(
         g: &B,
         cost: Cost,
@@ -362,7 +361,7 @@ impl Path {
     ///
     /// The path and the grid must belong together. In a debug build, passing a different board is
     /// rejected by the same index-identity check used by [`Grid`](crate::Grid) itself.
-    #[must_use]
+    #[must_use = "iterate the path's coordinates"]
     pub fn cells<'a, B: Grid + ?Sized>(&'a self, g: &'a B) -> impl Iterator<Item = B::Cell> + 'a {
         self.steps.iter().copied().map(move |i| g.coord(i))
     }

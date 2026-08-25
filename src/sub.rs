@@ -124,7 +124,7 @@ impl<'a, B: Grid> SubGrid<'a, B> {
     ///
     /// This is the coordinate-first name for [`root_indices`](Self::root_indices): use it when
     /// passing a region's cells to a root-owned [`CellMap`](crate::CellMap) or another root query.
-    #[must_use]
+    #[must_use = "iterate the region's root indices"]
     pub fn indices_in_root(&self) -> impl Iterator<Item = Idx> + '_ {
         self.root_indices()
     }
