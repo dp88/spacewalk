@@ -1,7 +1,5 @@
 ![spacewalk banner](art/banner.webp)
 
-*Banner image: [“Astronaut Walks in Space”](https://artvee.com/dl/astronaut-walks-in-space), via Artvee.*
-
 # spacewalk
 
 ## SPECIAL REPORT — A SMALL GRID LIBRARY ENTERS THE SPACE RACE
@@ -322,3 +320,5 @@ cargo build --target thumbv7em-none-eabihf --features serde
 ## LICENSE
 
 [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE)
+
+*Banner image: “Astronaut Walks in Space,” credited to the U.S. Information Agency; [source via Artvee](https://artvee.com/dl/astronaut-walks-in-space).*
