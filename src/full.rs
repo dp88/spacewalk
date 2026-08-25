@@ -126,7 +126,7 @@ pub struct FullGrid<C: Coord> {
 struct Back {
     start: Vec<u32>,
     from: Vec<u32>,
-    dir: Vec<u8>,
+    dir: Vec<u32>,
 }
 
 impl Back {
@@ -143,7 +143,7 @@ impl Back {
         }
 
         let edges = *start.last().unwrap_or(&0) as usize;
-        let (mut from, mut dir) = (vec![0; edges], vec![0u8; edges]);
+        let (mut from, mut dir) = (vec![0; edges], vec![0u32; edges]);
         let mut at = start.clone();
 
         for (slot, &j) in steps.iter().enumerate() {
@@ -152,7 +152,7 @@ impl Back {
             }
             let put = at[j as usize] as usize;
             from[put] = (slot / dirs) as u32;
-            dir[put] = (slot % dirs) as u8;
+            dir[put] = (slot % dirs) as u32;
             at[j as usize] += 1;
         }
 
@@ -203,7 +203,15 @@ impl<C: Coord> FullGrid<C> {
             );
         }
 
-        let mut steps = Vec::with_capacity(ordered.len() * dirs.len());
+        let edge_count = ordered
+            .len()
+            .checked_mul(dirs.len())
+            .expect("a grid's cell-direction table is too large");
+        assert!(
+            edge_count <= u32::MAX as usize,
+            "a grid's cell-direction table has too many entries ({edge_count})"
+        );
+        let mut steps = Vec::with_capacity(edge_count);
         for (i, &c) in ordered.iter().enumerate() {
             for &d in dirs {
                 let j = index.get(&c.step(d)).copied().unwrap_or(NONE);

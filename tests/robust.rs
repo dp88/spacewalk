@@ -140,6 +140,64 @@ fn a_grid_of_extreme_coordinates_can_be_built_and_measured() {
     );
 }
 
+#[test]
+fn a_wide_direction_alphabet_keeps_reverse_edges_correct() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    struct WideDir(u16);
+
+    const fn dirs() -> [WideDir; 257] {
+        let mut out = [WideDir(0); 257];
+        let mut i = 0;
+        while i < out.len() {
+            out[i] = WideDir(i as u16);
+            i += 1;
+        }
+        out
+    }
+
+    static DIRS: [WideDir; 257] = dirs();
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct Wide(i32);
+
+    impl Add for Wide {
+        type Output = Self;
+
+        fn add(self, other: Self) -> Self {
+            Self(self.0 + other.0)
+        }
+    }
+
+    impl Sub for Wide {
+        type Output = Self;
+
+        fn sub(self, other: Self) -> Self {
+            Self(self.0 - other.0)
+        }
+    }
+
+    impl Coord for Wide {
+        type Dir = WideDir;
+        const DIRS: &'static [WideDir] = &DIRS;
+
+        fn step(self, d: WideDir) -> Self {
+            (d.0 == 256).then_some(Self(self.0 + 1)).unwrap_or(self)
+        }
+    }
+
+    let g = FullGrid::new(
+        [Wide(0), Wide(1)],
+        Wide::DIRS,
+        Metric::scanning(|a: Wide, b: Wide| (b.0 - a.0).unsigned_abs()),
+    );
+
+    let one = g.at(Wide(1));
+    assert!(
+        g.in_neighbors(one)
+            .any(|(dir, from)| dir == WideDir(256) && from == g.at(Wide(0)))
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // A Coord that wraps: the torus, which is an ordinary thing to want
 // ---------------------------------------------------------------------------------------------
