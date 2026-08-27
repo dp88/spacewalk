@@ -246,12 +246,14 @@ fn a_sight_line_at_the_extremes_of_height_does_not_wrap() {
         "a tower four billion units high is not see-through — an i64 would have said it was"
     );
 
-    // The tower itself stays visible: the target is exempt at any height.
-    assert!(g.los_by(lo, tower, &sight));
+    assert!(
+        !g.los_by(hi, lo, &sight),
+        "and not from the other side either"
+    );
 
-    // Sight is deliberately not asserted in reverse here. On a board whose endpoints lie beyond the
-    // lerp's own limit, `line` cannot place them, and plain `los` is already one-sided for the same
-    // reason — a separate matter, and not one the height gate introduces or could fix.
+    // The tower itself stays visible from both ends: the target is exempt at any height.
+    assert!(g.los_by(lo, tower, &sight));
+    assert!(g.los_by(hi, tower, &sight));
 }
 
 #[test]

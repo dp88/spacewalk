@@ -12,6 +12,12 @@ All notable changes to this project are documented in this file.
   ledge refuses. Heights stay in a `CellMap` the application owns. Both gates
   are integer throughout, and the sight comparison is computed in `i128` so a
   hostile height field cannot wrap it.
+- `Grid::line` now always contains its own endpoints. A coordinate past the
+  lattice limit cannot be rounded back to, so an endpoint was dropped from its
+  own line: `los` then skipped a real blocker in the eye's place and became
+  one-sided, and on a dense board it returned an empty line, which blocks
+  nothing at all. Cells beyond the limit are still missed in between, which
+  `line` now documents.
 
 ## 0.1.0 — 2026-08-24
 
