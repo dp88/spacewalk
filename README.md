@@ -53,6 +53,10 @@ assert_eq!(route.cells(&grid).count(), 15); // the start is included
 - **Sight and regions come back as boards.** Range, ring, component, and
   field-of-view queries return a `SubGrid`, so the thing you highlight is
   also the thing you path over.
+- **Height is yours, and it still works.** Elevation belongs beside your
+  terrain, in a `CellMap`, not in the grid. `height_gate` says what a hill
+  hides and `climb_gate` what a ledge refuses, both composing with the
+  closures you already pass.
 - **Integer pathfinding, reproducible replays.** Floats exist only in the
   screen-layout layer; no float ever reaches a cost, metric, or step table.
 

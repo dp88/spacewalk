@@ -93,6 +93,37 @@
 //! back; [`Grid::subset`] makes one from any cells you name. A `SubGrid` borrows rather than copies,
 //! so asking for one costs a sort, not a board.
 //!
+//! # Height is game state, like everything else
+//!
+//! A cell's ground level is not geometry, so the grid does not hold it. It goes in a [`CellMap`]
+//! beside your terrain, and two gates read it: [`height_gate`] for what a hill hides,
+//! [`climb_gate`] for what a ledge refuses.
+//!
+//! ```
+//! use spacewalk::prelude::*;
+//!
+//! let g = FullGrid::square(9, 3, Adjacency::Eight);
+//! let mut ground = CellMap::new(&g, 0i32);
+//! ground[g.at(Sq::new(4, 1))] = 4;                     // a ridge across the middle
+//!
+//! let eye = g.at(Sq::new(0, 1));
+//! let sight = height_gate(&g, |i| ground[i], |i| ground[i] + 2);
+//!
+//! let seen = g.visible_from_by(eye, 8, &sight);
+//! assert!(seen.contains(Sq::new(4, 1)), "the ridge is in plain view");
+//! assert!(!seen.contains(Sq::new(8, 1)), "and the dead ground behind it is not");
+//! ```
+//!
+//! Sight needed one thing a plain blocker could not give it. A hill hides what is *lower* than the
+//! line passing over it, so whether a cell blocks depends on the target as much as on the cell.
+//! [`Grid::los_by`] and [`Grid::visible_from_by`] hand the predicate a [`Sight`] — the whole
+//! question, the way a cost function is handed a whole [`Step`]. [`Grid::los`] and
+//! [`Grid::visible_from`] are those two with the target thrown away, and are unchanged.
+//!
+//! Movement needed nothing new. A climb is priced by the cell entered and the direction of arrival,
+//! which is the river and the one-way ledge above; [`climb_gate`] only adds the limit past which a
+//! step is refused outright.
+//!
 //! # Drawing it, and clicking on it
 //!
 //! The lattice does not know what a pixel is, and does not need to — until you want to *show* it.
