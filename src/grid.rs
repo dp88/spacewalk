@@ -603,6 +603,16 @@ pub trait Grid {
     /// Cells the line crosses that are not on the board are skipped, so a line over a hole simply
     /// has a gap in it. Empty if this board's metric has no [`lerp`](Metric::lerp).
     ///
+    /// Both endpoints are always present, first and last. That is not free either: the
+    /// interpolation rounds through a clamp at the lattice limit, so a cell further out than that
+    /// cannot be rounded back to and would otherwise be missing from its own line.
+    ///
+    /// **Cells beyond that limit are still missed in between.** The same clamp sends every sampled
+    /// position out there to the same coordinate, so a line joining two cells further than 2³⁰ from
+    /// the origin reports only its endpoints, and sight along it stops at nothing. No board this
+    /// crate can build reaches that far — [`MAX_CELLS`](crate::MAX_CELLS) is 2²⁴ — so this bites
+    /// only a hand-built board of deliberately extreme coordinates.
+    ///
     /// Symmetric: `line(a, b)` is `line(b, a)` reversed. That is not free — rounding a tie breaks
     /// one way or the other — so the line is always computed from the lower coordinate and flipped
     /// if needed. Without it you get a board where A can see B but B cannot see A, which players
@@ -639,8 +649,15 @@ pub trait Grid {
                 .indices()
                 .filter_map(|j| {
                     let at = self.distance(lo, j);
-                    (at <= distance && metric.lerp(ca, cb, at, distance) == Some(self.coord(j)))
-                        .then_some((at, j))
+                    // The endpoints are on their own line by definition, and are kept without
+                    // asking the lerp. It rounds through a clamp at the lattice limit, so a
+                    // coordinate past that never matches itself — an endpoint used to be dropped
+                    // from its own line, and `los` then skipped a real blocker in its place.
+                    (j == lo
+                        || j == hi
+                        || (at <= distance
+                            && metric.lerp(ca, cb, at, distance) == Some(self.coord(j))))
+                    .then_some((at, j))
                 })
                 .collect();
             cells.sort_unstable_by_key(|&(at, j)| (at, j));
@@ -656,6 +673,15 @@ pub trait Grid {
             .filter_map(|t| self.index_of(metric.lerp(ca, cb, t, n)?))
             .collect();
         cells.dedup();
+        // Same guarantee as the sparse branch above. Past the lattice limit the interpolation
+        // cannot round to either end, and this branch lost both — returning an empty line, which
+        // blocks nothing, so sight ran clean through a wall standing between two neighbours.
+        if cells.first() != Some(&lo) {
+            cells.insert(0, lo);
+        }
+        if cells.last() != Some(&hi) {
+            cells.push(hi);
+        }
         if lo != a {
             cells.reverse();
         }
@@ -697,8 +723,9 @@ pub trait Grid {
     ///
     /// If `a` or `b` is not a cell of this board.
     fn los_by(&self, a: Idx, b: Idx, blocks: impl Fn(Sight) -> bool) -> bool {
-        self.line(a, b).into_iter().skip(1).all(|at| {
-            at == b
+        self.line(a, b).into_iter().all(|at| {
+            at == a
+                || at == b
                 || !blocks(Sight {
                     eye: a,
                     at,

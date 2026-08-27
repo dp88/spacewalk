@@ -141,6 +141,72 @@ fn a_grid_of_extreme_coordinates_can_be_built_and_measured() {
     );
 }
 
+/// Cells strung along `y = 0` at the coordinates given, four-way, Manhattan.
+fn strung(xs: impl IntoIterator<Item = i32>) -> FullGrid<Sq> {
+    FullGrid::new(
+        xs.into_iter().map(|x| Sq::new(x, 0)),
+        &Dir8::ORTHO,
+        Metric::MANHATTAN,
+    )
+}
+
+#[test]
+fn a_line_keeps_its_own_endpoints_however_far_out_they_sit() {
+    // A line is drawn by rounding an interpolation, and the rounding clamps to the lattice limit
+    // (2^30 - 1) so that a hex's derived third axis cannot overflow. A coordinate past that never
+    // rounds back to itself — so an endpoint failed to match itself and was dropped from its own
+    // line. The dense branch lost BOTH and returned nothing at all.
+    const Q: i32 = (1 << 30) - 1;
+
+    // Sparse: the coordinate span dwarfs the cell count, so the board is scanned.
+    let g = strung([i32::MIN, 0, Q, i32::MAX]);
+    let (lo, hi) = (g.at(Sq::new(i32::MIN, 0)), g.at(Sq::new(i32::MAX, 0)));
+    let line = g.line(lo, hi);
+    assert_eq!(line.first(), Some(&lo), "a line starts where you are");
+    assert_eq!(line.last(), Some(&hi), "and ends where you look");
+
+    // Dense: three cells, all of them past the limit.
+    let g = strung([i32::MAX - 2, i32::MAX - 1, i32::MAX]);
+    let (lo, hi) = (g.at(Sq::new(i32::MAX - 2, 0)), g.at(Sq::new(i32::MAX, 0)));
+    let line = g.line(lo, hi);
+    assert_eq!(line.first(), Some(&lo));
+    assert_eq!(line.last(), Some(&hi));
+}
+
+#[test]
+fn sight_is_symmetric_even_past_the_lattice_limit() {
+    // The bug this pins: `los` dropped the first cell of the line to skip the eye, but the eye was
+    // not always there to drop. Past the lattice limit it discarded a real blocker instead — and
+    // which one depended on the direction of travel, so A could see B while B could not see A.
+    const Q: i32 = (1 << 30) - 1;
+
+    let g = strung([i32::MIN, 0, Q, i32::MAX]);
+    let lo = g.at(Sq::new(i32::MIN, 0));
+    let hi = g.at(Sq::new(i32::MAX, 0));
+    let tower = g.at(Sq::new(Q, 0));
+
+    let wall = |i| i == tower;
+    assert_eq!(g.los(lo, hi, wall), g.los(hi, lo, wall), "one-sided sight");
+    assert!(!g.los(lo, hi, wall), "and the tower does stop the view");
+
+    // Every ordered pair, every choice of blocker, on a board built to break it.
+    for blocker in g.indices() {
+        let wall = |i| i == blocker;
+        for a in g.indices() {
+            for b in g.indices() {
+                assert_eq!(
+                    g.los(a, b, wall),
+                    g.los(b, a, wall),
+                    "blocker {:?}: {:?} <-> {:?}",
+                    g.coord(blocker),
+                    g.coord(a),
+                    g.coord(b)
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn a_sight_line_at_the_extremes_of_height_does_not_wrap() {
     // The height gate multiplies a height difference by a distance. Both come from the caller, and
