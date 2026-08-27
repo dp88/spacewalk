@@ -36,6 +36,33 @@ pub const MAX_SIGHT: u32 = 64;
 /// thing that belongs behind a name.
 pub type Dir<B> = <<B as Grid>::Cell as Coord>::Dir;
 
+/// One cell on a sight line: who is looking, what they are looking at, and the cell in between
+/// being tested.
+///
+/// This is to sight what [`Step`] is to movement. A cost function is handed the whole step rather
+/// than left to derive its own direction, and for the same reason a blocker is handed the whole
+/// question. Whether a cell stops sight is not always a property of that cell alone — a hill blocks
+/// only what is lower than it, a window looks one way, a crate hides a crouching unit and not a
+/// standing one. Each of those needs to know who is looking, and at what.
+///
+/// [`Grid::los_by`] and [`Grid::visible_from_by`] take a predicate over this.
+/// [`Grid::los`] and [`Grid::visible_from`] are the same thing with `target` thrown away.
+///
+/// # These are the receiver's indices
+///
+/// All three are numbered by the board you asked, not by its root. A field of view taken on a
+/// [`SubGrid`] hands the predicate `SubGrid` indices, so read your own tables through
+/// [`Grid::to_root`] if they are keyed against the whole board.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sight {
+    /// Where the looker stands. Never itself tested.
+    pub eye: Idx,
+    /// The cell being tested. This is the one that may stop sight.
+    pub at: Idx,
+    /// What the looker is trying to see. Never itself tested — you can see the wall you look at.
+    pub target: Idx,
+}
+
 /// Check that `i` belongs to this board, and turn it into a slot in the board's own tables.
 ///
 /// Two failures, and the second is the one that used to get through. The bounds check catches an
@@ -640,14 +667,43 @@ pub trait Grid {
     /// `b` itself may be a blocker and still be seen — you can see the wall you are looking at. The
     /// cell you are standing in is never consulted.
     ///
+    /// When what blocks depends on *who is looking* — elevation, cover, a one-way window — see
+    /// [`Grid::los_by`], which hands the predicate the whole question.
+    ///
     /// # Panics
     ///
     /// If `a` or `b` is not a cell of this board.
     fn los(&self, a: Idx, b: Idx, blocks: impl Fn(Idx) -> bool) -> bool {
-        self.line(a, b)
-            .into_iter()
-            .skip(1)
-            .all(|j| j == b || !blocks(j))
+        self.los_by(a, b, |s| blocks(s.at))
+    }
+
+    /// Can `a` see `b`, when what blocks depends on the looker and the target?
+    ///
+    /// The same walk as [`Grid::los`], with a predicate over [`Sight`] rather than over a bare
+    /// index. That is the whole difference, and it is what a height field needs: a hill hides only
+    /// what is lower than the line over it, so a blocker cannot be decided from its own cell alone.
+    ///
+    /// The predicate is never asked about `a` or `b` themselves.
+    ///
+    /// # A lattice with no straight line sees everything
+    ///
+    /// Sight is drawn along [`Grid::line`], and a [`Metric`] without a
+    /// [`lerp`](Metric::with_lerp) has no line to draw — so there are no cells to block on, and
+    /// this answers `true`. That is the long-standing behaviour of [`Grid::los`], preserved here.
+    /// A board like `tests/chess3d.rs` should not ask.
+    ///
+    /// # Panics
+    ///
+    /// If `a` or `b` is not a cell of this board.
+    fn los_by(&self, a: Idx, b: Idx, blocks: impl Fn(Sight) -> bool) -> bool {
+        self.line(a, b).into_iter().skip(1).all(|at| {
+            at == b
+                || !blocks(Sight {
+                    eye: a,
+                    at,
+                    target: b,
+                })
+        })
     }
 
     /// Every cell within `r` of `i` that can actually be seen.
@@ -673,6 +729,9 @@ pub trait Grid {
     /// assert!(!seen.contains(board.coord(behind)), "but not through it");
     /// ```
     ///
+    /// A blocker that depends on *who is looking* — a height field, cover, a one-way window —
+    /// cannot be written as `Fn(Idx) -> bool`. See [`Grid::visible_from_by`].
+    ///
     /// # Panics
     ///
     /// If `i` is not a cell of this board, or `r` exceeds [`MAX_SIGHT`]. The cap is not fussiness:
@@ -685,6 +744,41 @@ pub trait Grid {
         r: u32,
         blocks: impl Fn(Idx) -> bool,
     ) -> SubGrid<'_, Self::Root> {
+        self.visible_from_by(i, r, |s| blocks(s.at))
+    }
+
+    /// The field of view, when what blocks depends on the looker and the target.
+    ///
+    /// [`Grid::visible_from`] with a predicate over [`Sight`], and the reason this method exists:
+    /// its predicate is asked once per candidate **per cell of the line to that candidate**, so it
+    /// is the only one of the pair that can see which cell is being looked *at*. A height field
+    /// cannot be expressed without that — a ridge hides a unit in the valley and not the one on the
+    /// far peak, and those two questions differ only in the target.
+    ///
+    /// ```
+    /// use spacewalk::{Adjacency, FullGrid, Grid, Sq};
+    ///
+    /// let board = FullGrid::square(5, 5, Adjacency::Eight);
+    /// let eye = board.at(Sq::new(0, 2));
+    /// let far = board.at(Sq::new(4, 2));
+    ///
+    /// // A blocker that reads the target: every cell on the way to `far` stops sight of `far`,
+    /// // and stops nothing else. No predicate over the tested cell alone can say that.
+    /// let seen = board.visible_from_by(eye, 4, |s| s.target == far);
+    /// assert!(!seen.contains(Sq::new(4, 2)), "the one cell singled out");
+    /// assert!(seen.contains(Sq::new(2, 2)), "though the line to it runs through the same cells");
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If `i` is not a cell of this board, or `r` exceeds [`MAX_SIGHT`].
+    #[must_use]
+    fn visible_from_by(
+        &self,
+        i: Idx,
+        r: u32,
+        blocks: impl Fn(Sight) -> bool,
+    ) -> SubGrid<'_, Self::Root> {
         assert!(
             r <= MAX_SIGHT,
             "a sight radius of {r} is beyond MAX_SIGHT ({MAX_SIGHT}); raycasting is O(r^3) and \
@@ -695,7 +789,7 @@ pub trait Grid {
             .within(i, 0, r)
             .cells()
             .filter_map(|c| self.index_of(c))
-            .filter(|&j| self.los(i, j, &blocks))
+            .filter(|&j| self.los_by(i, j, &blocks))
             .collect();
         self.subset(seen)
     }
@@ -977,9 +1071,9 @@ pub trait Grid {
 
 #[cfg(test)]
 mod tests {
-    use crate::coord::{Dir8, Hex, Metric, Sq};
+    use crate::coord::{Dir8, Hex, Idx, Metric, Sq};
     use crate::full::{Adjacency, FullGrid};
-    use crate::grid::Grid;
+    use crate::grid::{Grid, Sight};
     use crate::path::Movement;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -1175,5 +1269,68 @@ mod tests {
                 .unwrap()
                 .contains(Sq::new(2, 2))
         );
+    }
+
+    #[test]
+    fn a_target_blind_gate_answers_exactly_as_the_plain_predicate_does() {
+        // The wrapper's whole claim: `los` is `los_by` with the target thrown away. Checked over
+        // every ordered pair on a board with a wall down the middle, so no single lucky line
+        // carries it.
+        let g = FullGrid::square(7, 7, Adjacency::Eight);
+        let wall = |i: Idx| g.coord(i).x == 3 && g.coord(i).y != 3;
+
+        for a in g.indices() {
+            for b in g.indices() {
+                assert_eq!(
+                    g.los(a, b, wall),
+                    g.los_by(a, b, |s| wall(s.at)),
+                    "{:?} -> {:?}",
+                    g.coord(a),
+                    g.coord(b)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_gate_that_reads_the_target_says_what_no_bare_predicate_could() {
+        // A one-way window: it stops sight INTO the east room and not out of it. The cell doing the
+        // blocking is the same cell either way, so `Fn(Idx) -> bool` cannot express this at all.
+        let g = FullGrid::square(7, 1, Adjacency::Eight);
+        let window = g.at(Sq::new(3, 0));
+        let west = g.at(Sq::new(0, 0));
+        let east = g.at(Sq::new(6, 0));
+
+        let one_way = |s: Sight| s.at == window && g.coord(s.target).x > 3;
+
+        assert!(!g.los_by(west, east, one_way), "you cannot see in");
+        assert!(g.los_by(east, west, one_way), "but you can see out");
+    }
+
+    #[test]
+    fn a_field_of_view_gate_is_told_which_cell_is_being_looked_at() {
+        // `visible_from` fixes the eye but not the target, which is the gap this pair closes.
+        let g = FullGrid::square(5, 5, Adjacency::Eight);
+        let eye = g.at(Sq::new(0, 2));
+        let far = g.at(Sq::new(4, 2));
+
+        let seen = g.visible_from_by(eye, 4, |s| s.target == far);
+        assert!(!seen.contains(Sq::new(4, 2)), "singled out by target");
+        assert!(
+            seen.contains(Sq::new(3, 2)),
+            "its neighbour is reached through the very same cells"
+        );
+    }
+
+    #[test]
+    fn the_eye_and_the_target_are_never_themselves_tested() {
+        let g = FullGrid::square(5, 1, Adjacency::Eight);
+        let (a, b) = (g.at(Sq::new(0, 0)), g.at(Sq::new(4, 0)));
+
+        assert!(g.los_by(a, b, |s| {
+            assert_ne!(s.at, s.eye, "the cell you stand in");
+            assert_ne!(s.at, s.target, "the wall you are looking at");
+            false
+        }),);
     }
 }
