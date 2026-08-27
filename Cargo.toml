@@ -26,7 +26,7 @@ missing_docs = "warn"
 # The implementation behind `std`'s `HashMap`, minus `std`. `default-hasher` is foldhash rather than
 # SipHash: the keys here are grid coordinates, so there is no adversary choosing them, and dropping
 # the hardening makes a board 2.4x faster to build than it was on `std`'s own map.
-hashbrown = { version = "0.16", default-features = false, features = [
+hashbrown = { version = "0.17", default-features = false, features = [
   "default-hasher",
 ] }
 # `default-features = false` is what keeps the crate off `std`; `alloc` is not optional, because
