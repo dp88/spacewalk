@@ -682,6 +682,7 @@ pub trait Grid {
     /// The same walk as [`Grid::los`], with a predicate over [`Sight`] rather than over a bare
     /// index. That is the whole difference, and it is what a height field needs: a hill hides only
     /// what is lower than the line over it, so a blocker cannot be decided from its own cell alone.
+    /// See [`height_gate`](crate::height_gate).
     ///
     /// The predicate is never asked about `a` or `b` themselves.
     ///

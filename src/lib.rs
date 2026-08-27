@@ -213,6 +213,7 @@ pub mod coord;
 mod float;
 pub mod full;
 pub mod grid;
+pub mod height;
 pub mod layout;
 pub mod path;
 pub mod rect;
@@ -225,6 +226,7 @@ pub use cells::CellMap;
 pub use coord::{Coord, Dir6, Dir8, Hex, Idx, Lerp, Metric, Sq, Tag};
 pub use full::{Adjacency, FullGrid, GridError, MAX_CELLS};
 pub use grid::{Dir, Grid, MAX_SIGHT, Sight};
+pub use height::{climb_gate, height_gate};
 pub use layout::{HexLayout, Offset, Orientation, Pt, SqLayout};
 pub use path::{Cost, Movement, MovementError, Path, Step};
 pub use rect::RectGrid;
@@ -248,6 +250,7 @@ pub mod prelude {
     pub use crate::{
         Adjacency, CellMap, Coord, CornerRule, Cost, Dir, Dir6, Dir8, FullGrid, Grid, Hex,
         HexLayout, Idx, Lerp, MAX_CELLS, MAX_SIGHT, Metric, Movement, MovementError, Offset,
-        Orientation, Path, Pt, RectGrid, Sight, Sq, SqLayout, Step, SubGrid, Tag, corner_gate,
+        Orientation, Path, Pt, RectGrid, Sight, Sq, SqLayout, Step, SubGrid, Tag, climb_gate,
+        corner_gate, height_gate,
     };
 }
