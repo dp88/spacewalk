@@ -13,6 +13,7 @@
 
 use std::ops::{Add, Sub};
 
+use spacewalk::height::height_gate;
 use spacewalk::{Adjacency, Coord, Dir8, FullGrid, Grid, Hex, Metric, Movement, Sq, Step};
 
 mod common;
@@ -137,6 +138,76 @@ fn a_grid_of_extreme_coordinates_can_be_built_and_measured() {
         g.neighbors(hi).count(),
         0,
         "and no wrap-around edge was forged"
+    );
+}
+
+#[test]
+fn a_sight_line_at_the_extremes_of_height_does_not_wrap() {
+    // The height gate multiplies a height difference by a distance. Both come from the caller, and
+    // both can be four billion — so the product needs 65 bits, and an `i64` has 64. That one bit is
+    // the whole bug: 4294967295 * 4294967295 wraps to -8589934591, which is *negative*, so a tower
+    // at i32::MAX stops looking like a blocker and sight runs straight through it. Computed in
+    // i128, where the comparison is exact.
+    //
+    // Reaching that product takes a deliberately hostile board. The two outer cells are four
+    // billion apart, and the tower sits at the far edge of what a lerp will round to.
+    const LATTICE_LIMIT: i32 = (1 << 30) - 1;
+
+    let g = FullGrid::new(
+        [
+            Sq::new(i32::MIN, 0),
+            Sq::new(0, 0),
+            Sq::new(LATTICE_LIMIT, 0),
+            Sq::new(i32::MAX, 0),
+        ],
+        &Dir8::ORTHO,
+        Metric::MANHATTAN,
+    );
+
+    let lo = g.at(Sq::new(i32::MIN, 0));
+    let hi = g.at(Sq::new(i32::MAX, 0));
+    let tower = g.at(Sq::new(LATTICE_LIMIT, 0));
+
+    assert_eq!(g.distance(lo, hi), u32::MAX, "the widest span there is");
+    assert_eq!(g.distance(lo, tower), 3_221_225_471);
+
+    // Everyone stands at the floor of `i32`; the tower rises to its ceiling.
+    let ground = move |i| if i == tower { i32::MAX } else { i32::MIN };
+    let sight = height_gate(&g, ground, move |_| i32::MIN);
+
+    assert!(
+        !g.los_by(lo, hi, &sight),
+        "a tower four billion units high is not see-through — an i64 would have said it was"
+    );
+
+    // The tower itself stays visible: the target is exempt at any height.
+    assert!(g.los_by(lo, tower, &sight));
+
+    // Sight is deliberately not asserted in reverse here. On a board whose endpoints lie beyond the
+    // lerp's own limit, `line` cannot place them, and plain `los` is already one-sided for the same
+    // reason — a separate matter, and not one the height gate introduces or could fix.
+}
+
+#[test]
+fn a_height_field_cannot_hang_a_field_of_view() {
+    // The same arithmetic inside the O(r^3) loop, at the largest radius the crate allows and with
+    // heights chosen to make every product enormous. It must finish, and it must not panic in debug
+    // where overflow is checked.
+    let g = FullGrid::square(64, 64, Adjacency::Eight);
+    let extreme = |i| {
+        if g.coord(i).x % 2 == 0 {
+            i32::MAX
+        } else {
+            i32::MIN
+        }
+    };
+    let sight = height_gate(&g, extreme, extreme);
+
+    let eye = g.at(Sq::new(32, 32));
+    let seen = g.visible_from_by(eye, spacewalk::MAX_SIGHT, &sight);
+    assert!(
+        seen.contains(Sq::new(32, 32)),
+        "you are always in your own view"
     );
 }
 
