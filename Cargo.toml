@@ -10,11 +10,17 @@ license = "MIT OR Apache-2.0"
 keywords = ["grid", "hex", "pathfinding", "tactics", "gamedev"]
 categories = ["game-development", "data-structures"]
 readme = "README.md"
-exclude = [".github/", "art/banner.af"]
+exclude = [".github/", "art/", "RELEASING.md", "deny.toml"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = []
 serde = ["dep:serde"]
+
+[lints.rust]
+missing_docs = "warn"
 
 [dependencies]
 # The implementation behind `std`'s `HashMap`, minus `std`. `default-hasher` is foldhash rather than

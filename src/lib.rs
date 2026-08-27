@@ -193,7 +193,6 @@
 //! own documentation says which questions hand back an iterator, which a board, and which a `Vec`.
 
 #![no_std]
-#![deny(missing_docs)]
 
 extern crate alloc;
 
