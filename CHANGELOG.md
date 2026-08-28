@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.0 — 2026-08-27
+
 - `Sight`, and the `Grid::los_by` and `Grid::visible_from_by` queries that take
   a predicate over it. A blocker is now told who is looking and what they are
   looking at, so a rule that depends on the target can be expressed at all.

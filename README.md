@@ -17,7 +17,7 @@ command of your application.
 
 ```toml
 [dependencies]
-spacewalk = "0.1"
+spacewalk = "0.2"
 ```
 
 ```rust
