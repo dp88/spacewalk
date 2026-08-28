@@ -106,11 +106,6 @@ impl Frontier {
         it
     }
 
-    /// The cheapest cell still waiting, or `None` when the search is exhausted.
-    fn pop(&mut self) -> Option<Visit> {
-        self.queue.pop()
-    }
-
     /// Whether a popped visit has been overtaken by a cheaper route found since it was queued.
     ///
     /// The queue holds no way to lower a key, so a cheaper route pushes a second entry and leaves
@@ -236,7 +231,7 @@ where
     // Saturating arithmetic keeps the queue ordered even for extreme costs.
     let heuristic = |i: Idx| u64::from(b.distance(i, goal).saturating_mul(m.min_step()));
 
-    while let Some(v) = frontier.pop() {
+    while let Some(v) = frontier.queue.pop() {
         if frontier.is_stale(&v) {
             continue;
         }
@@ -296,7 +291,7 @@ where
     let mut frontier = Frontier::new(b, start);
     let mut reached = Vec::new();
 
-    while let Some(v) = frontier.pop() {
+    while let Some(v) = frontier.queue.pop() {
         if v.cost > cap {
             break;
         }

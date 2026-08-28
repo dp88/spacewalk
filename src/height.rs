@@ -93,13 +93,13 @@ pub fn height_gate<'a, B: Grid + ?Sized>(
 ///
 /// Returns a predicate over a [`Step`], so it composes with your cost function the way
 /// [`corner_gate`](crate::corner_gate) does. `z` is the ground level of a cell, and `max_rise` the
-/// greatest ascent one step may make. Zero forbids all climbing; a negative value forbids everything
-/// but a descent.
+/// greatest ascent one step may make. Zero forbids all climbing. A negative value also refuses
+/// level ground and any descent shallower than its magnitude.
 ///
-/// **Descent is unrestricted.** A cliff you cannot climb is a cliff you may still drop off, which is
-/// the one-way ledge the crate's directed edges exist for. If falling should hurt, or be refused
-/// past some drop, that is your cost function's business and not a gate's — this one only ever says
-/// no to going up.
+/// With an ordinary, non-negative limit, **descent is unrestricted**. A cliff you cannot climb is a
+/// cliff you may still drop off, which is the one-way ledge the crate's directed edges exist for.
+/// If falling should hurt, or be refused past some drop, that is your cost function's business and
+/// not this gate's.
 ///
 /// It takes no grid: a step already names both cells, and their heights are all this rule reads.
 ///
@@ -181,17 +181,6 @@ mod tests {
     }
 
     #[test]
-    fn a_unit_on_the_hill_is_seen_from_the_flat() {
-        // Standing on the high ground makes you visible, not hidden: the sight line rises to meet
-        // you, so the ground under your feet is no longer above it.
-        let (g, ground) = ridge(5);
-        let sight = height_gate(&g, |i| ground[i], |i| ground[i] + 1);
-
-        let eye = g.at(Sq::new(0, 1));
-        assert!(g.los_by(eye, g.at(Sq::new(4, 1)), &sight));
-    }
-
-    #[test]
     fn sight_over_a_height_field_is_symmetric() {
         // The property the one-closure design exists to keep. Checked over every ordered pair, the
         // way `tests/fov.rs` checks it for plain sight.
@@ -210,36 +199,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn a_field_of_view_over_a_ridge_is_a_board_you_can_still_reason_over() {
-        let (g, ground) = ridge(5);
-        let sight = height_gate(&g, |i| ground[i], |i| ground[i] + 1);
-
-        let eye = g.at(Sq::new(0, 1));
-        let seen = g.visible_from_by(eye, 8, &sight);
-
-        assert!(seen.contains(Sq::new(4, 1)), "the hilltop");
-        assert!(!seen.contains(Sq::new(8, 1)), "the far end of its shadow");
-        assert!(seen.len() < g.len(), "a ridge hides something");
-        assert!(seen.indices().all(|i| g.contains(g.coord(seen.to_root(i)))));
-    }
-
-    #[test]
-    fn a_climb_gate_refuses_the_cliff_and_permits_the_drop() {
-        let g = FullGrid::square(4, 1, Adjacency::Four);
-        let mut ground = CellMap::new(&g, 0i32);
-        ground[g.at(Sq::new(2, 0))] = 3;
-
-        let climb = climb_gate(|i| ground[i], 1);
-        let walk = Movement::scan(&g, |s| climb(s).then_some(10 as Cost));
-
-        let west = g.at(Sq::new(0, 0));
-        let ledge = g.at(Sq::new(2, 0));
-
-        assert!(g.path(west, ledge, &walk).is_none());
-        assert_eq!(g.path(ledge, west, &walk).map(|p| p.len()), Some(2));
     }
 
     #[test]

@@ -603,15 +603,15 @@ pub trait Grid {
     /// Cells the line crosses that are not on the board are skipped, so a line over a hole simply
     /// has a gap in it. Empty if this board's metric has no [`lerp`](Metric::lerp).
     ///
-    /// Both endpoints are always present, first and last. That is not free either: the
-    /// interpolation rounds through a clamp at the lattice limit, so a cell further out than that
-    /// cannot be rounded back to and would otherwise be missing from its own line.
+    /// When the metric has a `lerp`, both endpoints are always present, first and last. That is not
+    /// free either: interpolation rounds through a clamp at the lattice limit, so a cell further
+    /// out than that cannot be rounded back to and would otherwise be missing from its own line.
     ///
     /// **Cells beyond that limit are still missed in between.** The same clamp sends every sampled
     /// position out there to the same coordinate, so a line joining two cells further than 2³⁰ from
-    /// the origin reports only its endpoints, and sight along it stops at nothing. No board this
-    /// crate can build reaches that far — [`MAX_CELLS`](crate::MAX_CELLS) is 2²⁴ — so this bites
-    /// only a hand-built board of deliberately extreme coordinates.
+    /// the origin reports only its endpoints, and sight along it stops at nothing. The standard
+    /// shape constructors cannot reach that far; this bites only a board built from deliberately
+    /// extreme coordinates.
     ///
     /// Symmetric: `line(a, b)` is `line(b, a)` reversed. That is not free — rounding a tie breaks
     /// one way or the other — so the line is always computed from the lower coordinate and flipped

@@ -118,7 +118,7 @@
 //! line passing over it, so whether a cell blocks depends on the target as much as on the cell.
 //! [`Grid::los_by`] and [`Grid::visible_from_by`] hand the predicate a [`Sight`] — the whole
 //! question, the way a cost function is handed a whole [`Step`]. [`Grid::los`] and
-//! [`Grid::visible_from`] are those two with the target thrown away, and are unchanged.
+//! [`Grid::visible_from`] remain as compatibility wrappers that throw the target away.
 //!
 //! Movement needed nothing new. A climb is priced by the cell entered and the direction of arrival,
 //! which is the river and the one-way ledge above; [`climb_gate`] only adds the limit past which a
