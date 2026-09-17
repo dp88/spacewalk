@@ -47,6 +47,9 @@ All notable changes to this project are documented in this file.
   becomes `g.path(g.at(a), g.at(b), &m)`.
 - **Breaking:** `SubGrid::indices_in_root` is gone. It was a second name for
   `SubGrid::root_indices`.
+- **Breaking:** the `prelude` module is gone. The crate root is now the short
+  list that the prelude was, so import from it by name. Remember `Grid`: it is
+  a trait, and it must be in scope before a method of a board can be called.
 
 ## 0.2.1 — 2026-09-17
 

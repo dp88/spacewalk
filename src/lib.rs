@@ -93,7 +93,7 @@
 //!
 //! ```
 //! use spacewalk::height::height_gate;
-//! use spacewalk::prelude::*;
+//! use spacewalk::{Adjacency, CellMap, FullGrid, Grid, Sq};
 //!
 //! let g = FullGrid::square(9, 3, Adjacency::Eight);
 //! let mut ground = CellMap::new(&g, 0i32);
@@ -220,8 +220,10 @@
 //!
 //! # Where to start
 //!
-//! [`prelude`] imports the names above in one line. [`Grid`] is where the vocabulary lives, and its
-//! own documentation says which questions hand back an iterator, which a board, and which a `Vec`.
+//! Import [`Grid`] first. It is a trait, so it must be in scope before any method of a board can be
+//! called, and that is the one import nobody guesses. [`Grid`] is also where the vocabulary lives,
+//! and its own documentation says which questions hand back an iterator, which a board, and which a
+//! `Vec`.
 
 #![no_std]
 
@@ -248,7 +250,7 @@ pub mod grid;
 pub mod height;
 pub mod layout;
 pub mod path;
-/// A\* and Dijkstra over a board's dense indices. Private: [`Grid`] is the way in.
+/// A\* and Dijkstra over dense node numbers. Private: [`Grid`] and [`Graph`] are the ways in.
 mod search;
 pub mod square;
 pub mod sub;
@@ -263,23 +265,3 @@ pub use grid::{Dir, Grid, MAX_SIGHT, Sight};
 pub use layout::Offset;
 pub use path::{Cost, Movement, MovementError, Path, Step};
 pub use sub::SubGrid;
-
-/// Everything you need to build a board and ask it something.
-///
-/// [`Grid`] is a trait, so it must be in scope for any of its methods to be callable —
-/// which is the one import nobody guesses. This is that, plus the handful of names that come with
-/// it.
-///
-/// ```
-/// use spacewalk::prelude::*;
-///
-/// let g = FullGrid::square(8, 8, Adjacency::Four);
-/// let walk = Movement::uniform(&g, 1);
-/// assert_eq!(g.path(g.at(Sq::new(0, 0)), g.at(Sq::new(7, 7)), &walk).unwrap().len(), 14);
-/// ```
-pub mod prelude {
-    pub use crate::{
-        Adjacency, CellMap, Coord, Cost, Dir, Dir6, Dir8, FullGrid, Grid, Hex, Idx, MAX_CELLS,
-        MAX_SIGHT, Metric, Movement, MovementError, Offset, Path, Sight, Sq, Step, SubGrid,
-    };
-}
