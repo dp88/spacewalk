@@ -124,6 +124,12 @@
 //! which is the river and the one-way ledge above; [`climb_gate`] only adds the limit past which a
 //! step is refused outright.
 //!
+//! # Routes without a grid
+//!
+//! Some maps have no geometry: rooms and the doors between them, towns and their roads. [`Graph`]
+//! runs the same searches over nodes that you name with a type of your own, from a plain list of
+//! edges. It needs no [`Coord`] and no board. See [`graph`].
+//!
 //! # Drawing it, and clicking on it
 //!
 //! The lattice does not know what a pixel is, and does not need to — until you want to *show* it.
@@ -243,6 +249,7 @@ pub mod coord;
 /// [`layout`] and [`coord`].
 mod float;
 pub mod full;
+pub mod graph;
 pub mod grid;
 pub mod height;
 pub mod layout;
@@ -256,6 +263,7 @@ pub mod sub;
 pub use cells::CellMap;
 pub use coord::{Coord, Dir6, Dir8, Hex, Idx, Lerp, Metric, Sq, Tag};
 pub use full::{Adjacency, FullGrid, GridError, MAX_CELLS};
+pub use graph::{Graph, GraphError};
 pub use grid::{Dir, Grid, MAX_SIGHT, Sight};
 pub use height::{climb_gate, height_gate};
 pub use layout::{HexLayout, Offset, Orientation, Pt, SqLayout};

@@ -49,7 +49,8 @@ assert_eq!(route.cells(&grid).count(), 15); // the start is included
 - **Directed movement costs.** A step's cost belongs to the cell entered and
   the direction of arrival — rivers, conveyors, and ledges just work. A*,
   budget-bounded Dijkstra, and reverse reachability search the graph with
-  deterministic tie-breaking.
+  deterministic tie-breaking. A `Graph` runs the same searches over nodes you
+  name yourself, from a plain list of edges, with no grid at all.
 - **Sight and regions come back as boards.** Range, ring, component, and
   field-of-view queries return a `SubGrid`, so the thing you highlight is
   also the thing you path over.

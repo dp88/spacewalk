@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- `Graph<K>` and `GraphError`: pathfinding with no grid. A graph is built from
+  a plain list of `(from, to, cost)` edges over nodes named by a type of your
+  own. It answers `path`, `reachable`, and `reaching` with the same search
+  engine, the same `Idx` and `Path` types, and the same tie-breaking as a
+  `Grid`. It needs no `Coord`, no directions, and no metric.
+
 ## 0.2.0 — 2026-08-27
 
 - `Sight`, and the `Grid::los_by` and `Grid::visible_from_by` queries that take
