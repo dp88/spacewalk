@@ -9,6 +9,10 @@ All notable changes to this project are documented in this file.
   own. It answers `path`, `reachable`, and `reaching` with the same search
   engine, the same `Idx` and `Path` types, and the same tie-breaking as a
   `Grid`. It needs no `Coord`, no directions, and no metric.
+- The `Grid` trait documentation no longer says that an outside crate can
+  implement it over storage of its own. Only this crate mints an `Idx`, so the
+  trait is a bound to write code against, and `Coord` is the extension point.
+  The stale method counts in the same documentation are gone.
 
 ## 0.2.0 — 2026-08-27
 

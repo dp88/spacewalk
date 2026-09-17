@@ -274,7 +274,7 @@ pub use sub::SubGrid;
 
 /// Everything you need to build a board and ask it something.
 ///
-/// [`Grid`] is a trait, so it must be in scope for any of its thirty-odd methods to be callable —
+/// [`Grid`] is a trait, so it must be in scope for any of its methods to be callable —
 /// which is the one import nobody guesses. This is that, plus the handful of names that come with
 /// it.
 ///

@@ -113,17 +113,19 @@ pub(crate) fn cost_ceiling(len: usize) -> Cost {
 
 /// A board: cells, the steps between them, and the questions you may ask about both.
 ///
-/// Implement this only if you are storing cells in a way this crate does not — it is the interface,
-/// not the extension point. To add a *shape* or a *geometry*, implement [`Coord`] and hand your
-/// cells to [`FullGrid::new`]; that is a few dozen lines and needs no change here.
+/// This trait is the vocabulary, not the extension point. Use it as a bound: `fn f<B: Grid>(g: &B)`
+/// takes every board this crate ships. An outside crate cannot implement it over storage of its
+/// own, because only this crate mints an [`Idx`]. To add a *shape* or a *geometry*, implement
+/// [`Coord`] and hand your cells to [`FullGrid::new`]; that is a few dozen lines and needs no
+/// change here.
 ///
-/// # The eleven you write, the twenty you get
+/// # A few primitives, and everything built on them
 ///
-/// Everything above the divider in the source is required and small: the cell count, the coordinate
-/// at an index and back, the direction alphabet, one step, the neighbours out and in, the metric,
-/// and the three that say where this board sits relative to the one that owns the cells. Everything
-/// else — rays, runs, ranges, lines, sight, components, and all of pathfinding — is written in
-/// terms of those, once, here.
+/// Everything above the divider in the source is required and small: the numbering tag, the cell
+/// count, the coordinate at an index and back, the direction alphabet, one step, the neighbours out
+/// and in, the metric, and the three that say where this board sits relative to the one that owns
+/// the cells. Everything else — rays, runs, ranges, lines, sight, components, and all of
+/// pathfinding — is written in terms of those, once, here.
 ///
 /// # Indices are per-board
 ///
