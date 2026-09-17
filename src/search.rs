@@ -26,9 +26,10 @@
 
 use alloc::collections::BinaryHeap;
 
-use crate::coord::{Idx, Tag};
+use crate::coord::Idx;
 use crate::grid::{Grid, slot};
 use crate::path::{Cost, Movement, Path, Step};
+use crate::tag::Tag;
 use alloc::vec;
 use alloc::vec::Vec;
 

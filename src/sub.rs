@@ -10,9 +10,11 @@
 //! [`component`](Grid::component) and [`visible_from`](Grid::visible_from) can hand one back
 //! without building anything.
 
-use crate::coord::{Coord, Idx, Metric, Tag};
+use crate::coord::{Coord, Idx, Metric};
 use crate::full::FullGrid;
+use crate::grid::sealed::Sealed;
 use crate::grid::{Grid, same_grid, slot};
+use crate::tag::Tag;
 use alloc::vec::Vec;
 
 /// Some of a board's cells, as a board of their own.
@@ -136,12 +138,14 @@ impl<'a, C: Coord> SubGrid<'a, C> {
     }
 }
 
-impl<C: Coord> Grid for SubGrid<'_, C> {
-    type Cell = C;
-
+impl<C: Coord> Sealed for SubGrid<'_, C> {
     fn tag(&self) -> Tag {
         self.tag
     }
+}
+
+impl<C: Coord> Grid for SubGrid<'_, C> {
+    type Cell = C;
 
     fn len(&self) -> usize {
         self.cells.len()

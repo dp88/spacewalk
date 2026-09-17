@@ -13,9 +13,11 @@ use core::fmt;
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
 
-use crate::coord::{Coord, Dir6, Dir8, Hex, Idx, Metric, Sq, Tag};
+use crate::coord::{Coord, Dir6, Dir8, Hex, Idx, Metric, Sq};
+use crate::grid::sealed::Sealed;
 use crate::grid::{Grid, same_grid, slot};
 use crate::layout::Offset;
+use crate::tag::Tag;
 use alloc::vec::Vec;
 
 /// The most cells a grid may hold: 2²⁴, or 16,777,216. A 4096 × 4096 board.
@@ -329,12 +331,14 @@ impl<C: Coord> FullGrid<C> {
     }
 }
 
-impl<C: Coord> Grid for FullGrid<C> {
-    type Cell = C;
-
+impl<C: Coord> Sealed for FullGrid<C> {
     fn tag(&self) -> Tag {
         self.tag
     }
+}
+
+impl<C: Coord> Grid for FullGrid<C> {
+    type Cell = C;
 
     fn len(&self) -> usize {
         self.cells.len()

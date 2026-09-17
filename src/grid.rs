@@ -8,10 +8,11 @@
 //! `path` is written in terms of the geometry primitives below and needs no storage of its own,
 //! which is why a region of a board can be a board without copying one.
 
-use crate::coord::{Coord, Idx, Metric, Tag};
+use crate::coord::{Coord, Idx, Metric};
 use crate::full::FullGrid;
 use crate::path::{Cost, Movement, Path, Step};
 use crate::sub::SubGrid;
+use crate::tag::Tag;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -108,20 +109,33 @@ pub(crate) fn cost_ceiling(len: usize) -> Cost {
     Cost::MAX / (len.saturating_sub(1).max(1) as Cost)
 }
 
+pub(crate) mod sealed {
+    use crate::tag::Tag;
+
+    /// What seals [`Grid`](super::Grid), and the one thing every board owes the crate alone.
+    pub trait Sealed {
+        /// This board's numbering, for checking the indices handed to it. See [`Tag`].
+        ///
+        /// Derived from the cells in index order, with [`Tag::of`]. Two boards that number the same
+        /// cells the same way must agree, or an index that *should* travel between them will trip
+        /// the check.
+        fn tag(&self) -> Tag;
+    }
+}
+
 /// A board: cells, the steps between them, and the questions you may ask about both.
 ///
-/// This trait is the vocabulary, not the extension point. Use it as a bound: `fn f<B: Grid>(g: &B)`
-/// takes every board this crate ships. An outside crate cannot implement it over storage of its
-/// own, because only this crate mints an [`Idx`]. To add a *shape* or a *geometry*, implement
-/// [`Coord`] and hand your cells to [`FullGrid::new`]; that is a few dozen lines and needs no
-/// change here.
+/// This trait is the vocabulary, not the extension point, and it is **sealed**: only this crate
+/// implements it, because only this crate mints an [`Idx`]. Use it as a bound:
+/// `fn f<B: Grid>(g: &B)` takes every board this crate ships. To add a *shape* or a *geometry*,
+/// implement [`Coord`] and hand your cells to [`FullGrid::new`]; that is a few dozen lines and
+/// needs no change here.
 ///
 /// # A few primitives, and everything built on them
 ///
-/// Everything above the divider in the source is required and small: the numbering tag, the cell
-/// count, the coordinate at an index and back, the direction alphabet, one step, the neighbours out
-/// and in, the metric, and the three that say where this board sits relative to the one that owns
-/// the cells. Everything else — rays, runs, ranges, lines, sight, components, and all of
+/// Everything above the divider in the source is required and small: the cell count, the coordinate
+/// at an index and back, the direction alphabet, one step, the neighbours out and in, the metric,
+/// and the three that say where this board sits relative to the one that owns the cells. Everything else — rays, runs, ranges, lines, sight, components, and all of
 /// pathfinding — is written in terms of those, once, here.
 ///
 /// # Indices are per-board
@@ -130,7 +144,7 @@ pub(crate) fn cost_ceiling(len: usize) -> Cost {
 /// from zero, so its indices and its root's are **both valid and mutually wrong**. [`to_root`] and
 /// [`of_root`] are the bridge, and they are the only correct one.
 ///
-/// A debug build catches the mistake for you: an index carries a [`Tag`] naming its board, and
+/// A debug build catches the mistake for you: an index carries a tag naming its board, and
 /// every method here checks it. In release the tag is zero-sized and the checks are gone.
 ///
 /// # What each question hands back
@@ -156,18 +170,11 @@ pub(crate) fn cost_ceiling(len: usize) -> Cost {
 ///
 /// [`to_root`]: Grid::to_root
 /// [`of_root`]: Grid::of_root
-pub trait Grid {
+pub trait Grid: sealed::Sealed {
     /// The coordinate this board is laid out on: [`Sq`](crate::Sq), [`Hex`](crate::Hex), or yours.
     type Cell: Coord;
 
     // -- required: the geometry primitives ---------------------------------------------------
-
-    /// This board's numbering, for checking the indices handed to it. See [`Tag`].
-    ///
-    /// Derive it from the cells in index order, with [`Tag::of`]. Two boards that number the same
-    /// cells the same way must agree, or an index that *should* travel between them will trip the
-    /// check.
-    fn tag(&self) -> Tag;
 
     /// How many cells the board has.
     fn len(&self) -> usize;

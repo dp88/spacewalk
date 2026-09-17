@@ -9,6 +9,7 @@
 //! three-layer chess board in a few dozen lines without touching this crate.
 
 use crate::float;
+use crate::tag::Tag;
 use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{Hash, Hasher};
@@ -89,8 +90,8 @@ pub struct Metric<C: Coord> {
     lerp: Option<Lerp<C>>,
 }
 
-/// The cell `t/n` of the way from `a` to `b`, rounded to the lattice. See [`Metric::lerp`].
-pub type Lerp<C> = fn(a: C, b: C, t: u32, n: u32) -> C;
+/// The shape of [`Metric::with_lerp`]'s argument. Private: the signature spells it out.
+type Lerp<C> = fn(a: C, b: C, t: u32, n: u32) -> C;
 
 impl<C: Coord> fmt::Debug for Metric<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -149,11 +150,15 @@ impl<C: Coord> Metric<C> {
 
     /// Give this metric a straight line, which is what [`Grid::los`](crate::Grid::los) needs.
     ///
+    /// `lerp(a, b, t, n)` returns the cell `t/n` of the way from `a` to `b`, rounded to the lattice.
+    /// It returns **one cell**, and the grid drives the loop, so no coordinate of yours can size an
+    /// allocation.
+    ///
     /// Without one, sight falls back to nothing: a lattice that cannot say which cells lie between
     /// two others cannot say what blocks a view. Not every lattice has a sensible answer — a
     /// three-layer chess board does not — and saying so is better than guessing.
     #[must_use]
-    pub const fn with_lerp(mut self, lerp: Lerp<C>) -> Self {
+    pub const fn with_lerp(mut self, lerp: fn(a: C, b: C, t: u32, n: u32) -> C) -> Self {
         self.lerp = Some(lerp);
         self
     }
@@ -354,102 +359,6 @@ impl Metric<Hex> {
     .with_lerp(hex_lerp);
 }
 
-/// FNV-1a, because `core` has no hasher and this needs no more than one.
-///
-/// A [`Tag`] is compared only against other tags made in the same process, in a debug build, to
-/// catch a mistake. It does not have to resist an adversary or survive a restart — it has to be
-/// cheap, deterministic, and mix well enough that two different boards rarely collide.
-#[cfg(debug_assertions)]
-struct Fnv(u64);
-
-#[cfg(debug_assertions)]
-impl Hasher for Fnv {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 ^= u64::from(b);
-            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-}
-
-/// Which board's numbering an [`Idx`] belongs to.
-///
-/// A tag names a *numbering*, not an object. Two boards that number the same cells in the same
-/// order share one, and their indices are interchangeable — which is the property
-/// [`FullGrid::new`](crate::FullGrid::new) promises and `tests/save.rs` rests on. A tag derived
-/// from a counter would break that, so this is derived from the cells.
-///
-/// In release builds this is a zero-sized type: every check below compiles to nothing, and an
-/// [`Idx`] is a bare `u32` again.
-#[cfg(debug_assertions)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Tag(u32);
-
-/// Which board's numbering an [`Idx`] belongs to. Zero-sized in release; see the debug definition.
-#[cfg(not(debug_assertions))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Tag;
-
-impl Tag {
-    /// Derive a tag from a board's cells, in index order.
-    ///
-    /// The iterator is **never consumed in release**, so a caller may hand over one that would be
-    /// expensive to walk, and pay nothing for it in a shipped build.
-    #[cfg(debug_assertions)]
-    pub fn of<H: Hash>(items: impl IntoIterator<Item = H>) -> Self {
-        let mut h = Fnv(0xcbf2_9ce4_8422_2325);
-        let mut n: u64 = 0;
-        for item in items {
-            item.hash(&mut h);
-            n += 1;
-        }
-        // Length is mixed in last so that a prefix of another board's cells cannot collide with it.
-        h.write_u64(n);
-        // Forced odd, which keeps zero free to mean [`Tag::ANY`].
-        #[allow(clippy::cast_possible_truncation)]
-        Self(h.finish() as u32 | 1)
-    }
-
-    /// Derive a tag from a board's cells, in index order. Ignores its argument in release.
-    #[cfg(not(debug_assertions))]
-    pub fn of<H: Hash>(items: impl IntoIterator<Item = H>) -> Self {
-        let _ = items;
-        Self
-    }
-
-    /// Whether an index carrying `self` may be handed to a board carrying `other`.
-    ///
-    /// Equal tags, or [`Tag::ANY`] on either side. One definition serves both profiles: in release
-    /// a `Tag` is zero-sized, so every arm is trivially true — and every caller is inside a
-    /// `debug_assert`, which is gone by then anyway.
-    pub(crate) fn agrees(self, other: Self) -> bool {
-        self == other || self == Self::ANY || other == Self::ANY
-    }
-}
-
-impl Tag {
-    /// A tag that matches every board: what an index carries when nothing named its grid.
-    ///
-    /// One thing mints these — [`CellMap::iter`](crate::CellMap::iter) on a map that came back from
-    /// serde, which has no grid to name. Dropping the check there is deliberate: what makes such a
-    /// map line up is the cells saved beside it, and those are already the rule. See `tests/save.rs`.
-    pub(crate) const ANY: Self = Self::any();
-
-    #[cfg(debug_assertions)]
-    const fn any() -> Self {
-        Self(0)
-    }
-
-    #[cfg(not(debug_assertions))]
-    const fn any() -> Self {
-        Self
-    }
-}
-
 /// A cell's dense index within one [`Grid`](crate::Grid).
 ///
 /// Indices are assigned at construction and are stable for that grid's lifetime — but they mean
@@ -457,7 +366,8 @@ impl Tag {
 ///
 /// # It carries the board it came from
 ///
-/// In a debug build an `Idx` also holds a [`Tag`], and every method that takes one checks it. That
+/// In a debug build an `Idx` also holds a tag that names its board, and every method that takes one
+/// checks it. That
 /// turns the crate's sharpest failure — an index from one board silently addressing a *different
 /// cell* on another — into a panic that names the mistake. The check finds the case a bounds check
 /// never could: two boards of the same size, where every index is in range for both.

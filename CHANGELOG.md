@@ -27,6 +27,12 @@ All notable changes to this project are documented in this file.
   is now a `FullGrid`. `Grid::root` returns `&FullGrid<Self::Cell>`, and a
   region is `SubGrid<'_, C>` over its coordinate type, where it was
   `SubGrid<'_, FullGrid<C>>`.
+- **Breaking:** the `Grid` trait is sealed. No outside crate could implement
+  it over storage of its own in any case, because only this crate mints an
+  `Idx`; the seal states that in the type system, and frees the trait to grow.
+  `Grid::tag` moves to the private supertrait, and `Tag` is no longer public.
+- **Breaking:** the `Lerp` alias is gone. `Metric::with_lerp` takes the same
+  function pointer, written out: `fn(a: C, b: C, t: u32, n: u32) -> C`.
 
 ## 0.2.1 — 2026-09-17
 

@@ -50,11 +50,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
-use crate::coord::{Idx, Tag};
+use crate::coord::Idx;
 use crate::full::MAX_CELLS;
 use crate::grid::cost_ceiling;
 use crate::path::{Cost, Path};
 use crate::search;
+use crate::tag::Tag;
 
 /// Why a graph could not be built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

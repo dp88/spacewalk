@@ -24,8 +24,9 @@ use core::ops::{Index, IndexMut};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::coord::{Idx, Tag};
+use crate::coord::Idx;
 use crate::grid::Grid;
+use crate::tag::Tag;
 use alloc::vec;
 use alloc::vec::Vec;
 

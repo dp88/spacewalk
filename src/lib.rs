@@ -174,7 +174,7 @@
 //! // Sq::new(3, 2), which is why the rule below is still the rule.
 //! ```
 //!
-//! That is a [`Tag`], and in release it is zero-sized: the checks vanish and an `Idx` is a bare
+//! That is the index's tag, and in release it is zero-sized: the checks vanish and an `Idx` is a bare
 //! `u32` again. Equality, ordering, and hashing compare the number alone in both profiles, so
 //! nothing you observe changes with the build — only whether the mistake is reported. Treat it as
 //! it is meant: a development aid, not a runtime guarantee. The rule is still *serialize
@@ -250,9 +250,11 @@ pub mod path;
 mod search;
 pub mod square;
 pub mod sub;
+/// The numbering tag behind an [`Idx`]. Private: no outside crate has a use for it.
+mod tag;
 
 pub use cells::CellMap;
-pub use coord::{Coord, Dir6, Dir8, Hex, Idx, Lerp, Metric, Sq, Tag};
+pub use coord::{Coord, Dir6, Dir8, Hex, Idx, Metric, Sq};
 pub use full::{Adjacency, FullGrid, GridError, MAX_CELLS};
 pub use graph::{Graph, GraphError};
 pub use grid::{Dir, Grid, MAX_SIGHT, Sight};
@@ -278,8 +280,7 @@ pub use sub::SubGrid;
 pub mod prelude {
     pub use crate::{
         Adjacency, CellMap, Coord, CornerRule, Cost, Dir, Dir6, Dir8, FullGrid, Grid, Hex,
-        HexLayout, Idx, Lerp, MAX_CELLS, MAX_SIGHT, Metric, Movement, MovementError, Offset,
-        Orientation, Path, Pt, Sight, Sq, SqLayout, Step, SubGrid, Tag, climb_gate, corner_gate,
-        height_gate,
+        HexLayout, Idx, MAX_CELLS, MAX_SIGHT, Metric, Movement, MovementError, Offset, Orientation,
+        Path, Pt, Sight, Sq, SqLayout, Step, SubGrid, climb_gate, corner_gate, height_gate,
     };
 }
