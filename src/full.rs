@@ -331,7 +331,6 @@ impl<C: Coord> FullGrid<C> {
 
 impl<C: Coord> Grid for FullGrid<C> {
     type Cell = C;
-    type Root = Self;
 
     fn tag(&self) -> Tag {
         self.tag

@@ -65,7 +65,7 @@ fn a_movement_range_is_a_board_a_route_cannot_leave() {
 
     let budget = 40;
     let reach = g.reachable(unit, budget, &march(&g, &terrain));
-    let range: SubGrid<FullGrid<Sq>> = g.subset(reach.iter().map(|&(i, _)| i));
+    let range: SubGrid<Sq> = g.subset(reach.iter().map(|&(i, _)| i));
 
     assert!(
         range.len() > 1 && range.len() < g.len(),

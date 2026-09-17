@@ -24,7 +24,7 @@ fn board() -> FullGrid<Hex> {
 }
 
 /// Every move a piece at `from` could make, were the board empty: clones, then jumps.
-fn moves(g: &FullGrid<Hex>, from: Idx) -> (SubGrid<'_, FullGrid<Hex>>, SubGrid<'_, FullGrid<Hex>>) {
+fn moves(g: &FullGrid<Hex>, from: Idx) -> (SubGrid<'_, Hex>, SubGrid<'_, Hex>) {
     (g.ring(from, 1), g.ring(from, 2))
 }
 

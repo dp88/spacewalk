@@ -23,6 +23,10 @@ All notable changes to this project are documented in this file.
   avoid the tables that `FullGrid` no longer has. Use
   `FullGrid::square(w, h, adjacency)`: it gives the same cells and the same
   indices. It holds about 34 bytes a cell, where `RectGrid` held nothing.
+- **Breaking:** the `Grid::Root` associated type is gone, because every root
+  is now a `FullGrid`. `Grid::root` returns `&FullGrid<Self::Cell>`, and a
+  region is `SubGrid<'_, C>` over its coordinate type, where it was
+  `SubGrid<'_, FullGrid<C>>`.
 
 ## 0.2.1 — 2026-09-17
 

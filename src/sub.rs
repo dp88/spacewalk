@@ -2,7 +2,7 @@
 //!
 //! A movement range, a blast, a room, what a unit can see. Each is a set of cells you want to
 //! *show* and then *reason about* — and reasoning about it means asking the same questions you ask
-//! a board. So it is one: [`SubGrid`] implements [`Grid`] exactly as [`FullGrid`](crate::FullGrid) does, and a
+//! a board. So it is one: [`SubGrid`] implements [`Grid`] exactly as [`FullGrid`] does, and a
 //! function that takes one takes either.
 //!
 //! It costs a sorted `Vec<Idx>` and nothing else. Every question is answered by the root board and
@@ -10,8 +10,9 @@
 //! [`component`](Grid::component) and [`visible_from`](Grid::visible_from) can hand one back
 //! without building anything.
 
-use crate::coord::{Idx, Metric, Tag};
-use crate::grid::{Dir, Grid, same_grid, slot};
+use crate::coord::{Coord, Idx, Metric, Tag};
+use crate::full::FullGrid;
+use crate::grid::{Grid, same_grid, slot};
 use alloc::vec::Vec;
 
 /// Some of a board's cells, as a board of their own.
@@ -58,8 +59,8 @@ use alloc::vec::Vec;
 /// Distances are untouched. The metric measures coordinates, and a subset does not move any cell,
 /// so a range-2 archer inside a region still reaches two cells away.
 #[derive(Debug, Clone)]
-pub struct SubGrid<'a, B: Grid> {
-    root: &'a B,
+pub struct SubGrid<'a, C: Coord> {
+    root: &'a FullGrid<C>,
     /// The root's index for each of this board's cells, strictly ascending. One `Vec` serves both
     /// directions: `to_root` indexes it, `of_root` searches it.
     ///
@@ -72,14 +73,14 @@ pub struct SubGrid<'a, B: Grid> {
     tag: Tag,
 }
 
-impl<'a, B: Grid> SubGrid<'a, B> {
+impl<'a, C: Coord> SubGrid<'a, C> {
     /// Sort and dedup the root indices, which is the whole of building one.
     ///
     /// The order a caller lists cells in does not reach the result. `FullGrid::new` honours caller
     /// order because the save round-trip depends on it; nobody has a numbering intent for a region,
     /// so this picks the root's order and the `cells` table is ascending by construction rather
     /// than by an assertion the caller can trip.
-    pub(crate) fn of(root: &'a B, cells: impl IntoIterator<Item = Idx>) -> Self {
+    pub(crate) fn of(root: &'a FullGrid<C>, cells: impl IntoIterator<Item = Idx>) -> Self {
         let root_tag = root.tag();
         let mut cells: Vec<u32> = cells
             .into_iter()
@@ -135,9 +136,8 @@ impl<'a, B: Grid> SubGrid<'a, B> {
     }
 }
 
-impl<B: Grid> Grid for SubGrid<'_, B> {
-    type Cell = B::Cell;
-    type Root = B;
+impl<C: Coord> Grid for SubGrid<'_, C> {
+    type Cell = C;
 
     fn tag(&self) -> Tag {
         self.tag
@@ -147,43 +147,43 @@ impl<B: Grid> Grid for SubGrid<'_, B> {
         self.cells.len()
     }
 
-    fn coord(&self, i: Idx) -> B::Cell {
+    fn coord(&self, i: Idx) -> C {
         let at = slot(self.len(), self.tag, i);
         self.root.coord(self.of_cells(at))
     }
 
-    fn index_of(&self, c: B::Cell) -> Option<Idx> {
+    fn index_of(&self, c: C) -> Option<Idx> {
         self.of_root(self.root.index_of(c)?)
     }
 
-    fn dirs(&self) -> &[Dir<Self>] {
+    fn dirs(&self) -> &[C::Dir] {
         self.root.dirs()
     }
 
-    fn step(&self, i: Idx, d: Dir<Self>) -> Option<Idx> {
+    fn step(&self, i: Idx, d: C::Dir) -> Option<Idx> {
         let at = slot(self.len(), self.tag, i);
         self.of_root(self.root.step(self.of_cells(at), d)?)
     }
 
-    fn neighbors(&self, i: Idx) -> impl Iterator<Item = (Dir<Self>, Idx)> {
+    fn neighbors(&self, i: Idx) -> impl Iterator<Item = (C::Dir, Idx)> {
         let at = slot(self.len(), self.tag, i);
         self.root
             .neighbors(self.of_cells(at))
             .filter_map(move |(d, j)| Some((d, self.of_root(j)?)))
     }
 
-    fn in_neighbors(&self, j: Idx) -> impl Iterator<Item = (Dir<Self>, Idx)> {
+    fn in_neighbors(&self, j: Idx) -> impl Iterator<Item = (C::Dir, Idx)> {
         let at = slot(self.len(), self.tag, j);
         self.root
             .in_neighbors(self.of_cells(at))
             .filter_map(move |(d, i)| Some((d, self.of_root(i)?)))
     }
 
-    fn metric(&self) -> Metric<B::Cell> {
+    fn metric(&self) -> Metric<C> {
         self.root.metric()
     }
 
-    fn root(&self) -> &B {
+    fn root(&self) -> &FullGrid<C> {
         self.root
     }
 

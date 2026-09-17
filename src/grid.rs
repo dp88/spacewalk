@@ -9,8 +9,6 @@
 //! which is why a region of a board can be a board without copying one.
 
 use crate::coord::{Coord, Idx, Metric, Tag};
-// The trait no longer names a `FullGrid`, but the documentation below links to one throughout.
-#[allow(unused_imports)]
 use crate::full::FullGrid;
 use crate::path::{Cost, Movement, Path, Step};
 use crate::sub::SubGrid;
@@ -162,13 +160,6 @@ pub trait Grid {
     /// The coordinate this board is laid out on: [`Sq`](crate::Sq), [`Hex`](crate::Hex), or yours.
     type Cell: Coord;
 
-    /// The whole board these cells belong to: `Self` for one you built, and the board it was taken
-    /// from for a [`SubGrid`].
-    ///
-    /// A region is numbered against its root, so this is what [`to_root`](Grid::to_root) and every
-    /// range query speak in terms of.
-    type Root: Grid<Cell = Self::Cell>;
-
     // -- required: the geometry primitives ---------------------------------------------------
 
     /// This board's numbering, for checking the indices handed to it. See [`Tag`].
@@ -238,7 +229,10 @@ pub trait Grid {
     fn metric(&self) -> Metric<Self::Cell>;
 
     /// The board that owns these cells. A whole board is its own root.
-    fn root(&self) -> &Self::Root;
+    ///
+    /// A region is numbered against its root, so this is what [`to_root`](Grid::to_root) and every
+    /// range query speak in terms of.
+    fn root(&self) -> &FullGrid<Self::Cell>;
 
     /// This board's index for a cell, as the [`root`](Grid::root) numbers it.
     ///
@@ -371,13 +365,13 @@ pub trait Grid {
     /// let a = corner.at(Sq::new(0, 0));
     /// assert_eq!(corner.neighbors(a).count(), 2, "and its own edges");
     /// ```
-    fn subset(&self, cells: impl IntoIterator<Item = Idx>) -> SubGrid<'_, Self::Root> {
+    fn subset(&self, cells: impl IntoIterator<Item = Idx>) -> SubGrid<'_, Self::Cell> {
         SubGrid::of(self.root(), cells.into_iter().map(|i| self.to_root(i)))
     }
 
     /// The cells within a coordinate range, or `None` if the origin is not on this board.
     #[must_use]
-    fn within_cell(&self, c: Self::Cell, min: u32, max: u32) -> Option<SubGrid<'_, Self::Root>> {
+    fn within_cell(&self, c: Self::Cell, min: u32, max: u32) -> Option<SubGrid<'_, Self::Cell>> {
         self.index_of(c).map(|i| self.within(i, min, max))
     }
 
@@ -554,7 +548,7 @@ pub trait Grid {
     ///
     /// If `i` is not a cell of this board.
     #[must_use]
-    fn within(&self, i: Idx, min: u32, max: u32) -> SubGrid<'_, Self::Root> {
+    fn within(&self, i: Idx, min: u32, max: u32) -> SubGrid<'_, Self::Cell> {
         let _ = slot(self.len(), self.tag(), i);
         if min > max {
             return self.subset([]);
@@ -591,7 +585,7 @@ pub trait Grid {
     ///
     /// If `i` is not a cell of this board.
     #[must_use]
-    fn ring(&self, i: Idx, r: u32) -> SubGrid<'_, Self::Root> {
+    fn ring(&self, i: Idx, r: u32) -> SubGrid<'_, Self::Cell> {
         self.within(i, r, r)
     }
 
@@ -771,7 +765,7 @@ pub trait Grid {
         i: Idx,
         r: u32,
         blocks: impl Fn(Idx) -> bool,
-    ) -> SubGrid<'_, Self::Root> {
+    ) -> SubGrid<'_, Self::Cell> {
         self.visible_from_by(i, r, |s| blocks(s.at))
     }
 
@@ -806,7 +800,7 @@ pub trait Grid {
         i: Idx,
         r: u32,
         blocks: impl Fn(Sight) -> bool,
-    ) -> SubGrid<'_, Self::Root> {
+    ) -> SubGrid<'_, Self::Cell> {
         assert!(
             r <= MAX_SIGHT,
             "a sight radius of {r} is beyond MAX_SIGHT ({MAX_SIGHT}); raycasting is O(r^3) and \
@@ -829,7 +823,7 @@ pub trait Grid {
         c: Self::Cell,
         r: u32,
         blocks: impl Fn(Idx) -> bool,
-    ) -> Option<SubGrid<'_, Self::Root>> {
+    ) -> Option<SubGrid<'_, Self::Cell>> {
         self.index_of(c).map(|i| self.visible_from(i, r, blocks))
     }
 
@@ -867,7 +861,7 @@ pub trait Grid {
     ///
     /// If `i` is not a cell of this board.
     #[must_use]
-    fn component(&self, i: Idx, passable: impl Fn(Idx) -> bool) -> SubGrid<'_, Self::Root> {
+    fn component(&self, i: Idx, passable: impl Fn(Idx) -> bool) -> SubGrid<'_, Self::Cell> {
         let _ = slot(self.len(), self.tag(), i);
         if !passable(i) {
             return self.subset([]);
@@ -897,7 +891,7 @@ pub trait Grid {
         &self,
         c: Self::Cell,
         passable: impl Fn(Idx) -> bool,
-    ) -> Option<SubGrid<'_, Self::Root>> {
+    ) -> Option<SubGrid<'_, Self::Cell>> {
         self.index_of(c).map(|i| self.component(i, passable))
     }
 
