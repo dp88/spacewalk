@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `FullGrid` no longer stores a step table or a reverse table. It
+  keeps the coordinates and the index over them, and computes each step from
+  the coordinate. A stored board drops from about 134 bytes a cell to about 34
+  (eight-way) and builds about 1.4 times faster. Every query returns the same
+  answer. The price is search speed: `path`, `reachable`, and `reaching` run
+  40% to 60% slower than in 0.2.1 on every board measured, from 16×16 to
+  512×512. Sight queries are unchanged.
+- **Breaking:** `Coord::step` must move every cell of a board by one offset, as
+  the coordinate's own `Sub` measures it. The grid finds who can step into a
+  cell by undoing the step, so it can no longer hold a step that leads two
+  cells into one, or a portal. `FullGrid::new` checks every edge and refuses
+  such a board with the new `GridError::StepNotInvertible`. A step that clamps
+  at the edge of the board, and a world whose `Add` and `Sub` wrap, still work.
+- **Breaking:** `GridError::TooManyEdges` is gone. With no table of edges there
+  is no edge limit to pass.
+
 ## 0.2.1 — 2026-09-17
 
 - `Graph<K>` and `GraphError`: pathfinding with no grid. A graph is built from

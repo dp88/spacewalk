@@ -109,7 +109,7 @@ fn a_component_comes_back_in_the_same_order_every_time() {
 #[test]
 fn indices_follow_the_order_the_cells_were_given_in() {
     // Determinism starts at construction: the caller's cell order fixes the indices, and the
-    // direction order fixes the step table, and everything downstream inherits both.
+    // direction order fixes the order steps are tried in, and everything downstream inherits both.
     for _ in 0..10 {
         let g = FullGrid::square(4, 4, Adjacency::Four);
         let order: Vec<Sq> = g.cells().take(5).collect();

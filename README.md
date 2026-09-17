@@ -59,7 +59,7 @@ assert_eq!(route.cells(&grid).count(), 15); // the start is included
   hides and `climb_gate` what a ledge refuses, both composing with the
   closures you already pass.
 - **Integer pathfinding, reproducible replays.** Floats exist only in the
-  screen-layout layer; no float ever reaches a cost, metric, or step table.
+  screen-layout layer; no float ever reaches a cost, a metric, or a step.
 
 ## Requirements and features
 

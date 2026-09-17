@@ -1,7 +1,7 @@
 //! A full rectangle of square cells, computed rather than stored.
 //!
-//! [`FullGrid`](crate::FullGrid) holds any set of cells, so it must store the cells, the index of
-//! each, and the step table both ways. On a full `w × h` rectangle every one of those answers is
+//! [`FullGrid`](crate::FullGrid) holds any set of cells, so it must store the cells and the index
+//! of each. On a full `w × h` rectangle every one of those answers is
 //! arithmetic: the index is `y * w + x`, the coordinate is a divmod, a step is a coordinate add and
 //! a bounds check, and a predecessor is the same step the other way. [`RectGrid`] does that
 //! arithmetic and stores three numbers.
@@ -17,9 +17,8 @@ use crate::grid::{Grid, same_grid, slot};
 ///
 /// It answers exactly as `FullGrid::square(w, h, adj)` does, cell for cell and index for index —
 /// `rect.rs`'s own test holds the two side by side. The difference is what it costs: three fields,
-/// whatever the size of the board. A 512 × 512 map keeps a step table of a quarter of a million
-/// cells times eight directions, and the coordinate list and index map beside it, or it keeps
-/// twelve bytes.
+/// whatever the size of the board. A 512 × 512 map keeps a quarter of a million coordinates and an
+/// index map over them, or it keeps twelve bytes.
 ///
 /// The adjacency picks the metric to match it, exactly as [`FullGrid::square`](crate::FullGrid::square)
 /// does; see [`Adjacency`].

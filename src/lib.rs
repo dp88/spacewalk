@@ -57,10 +57,10 @@
 //!
 //! # A plain rectangle stores nothing
 //!
-//! A [`FullGrid`] holds any set of cells, so it must store the cells, an index over them, and the
-//! step table both ways. On a full `w × h` rectangle each of those is arithmetic, and
-//! [`RectGrid`] is that arithmetic: same answers, same indices, three fields whatever the size of
-//! the board. It is what a large outdoor map wants. `FullGrid` is what everything else wants.
+//! A [`FullGrid`] holds any set of cells, so it must store the cells and an index over them. On a
+//! full `w × h` rectangle each of those is arithmetic, and [`RectGrid`] is that arithmetic: same
+//! answers, same indices, three fields whatever the size of the board. It is what a large outdoor
+//! map wants. `FullGrid` is what everything else wants.
 //!
 //! # A region of a board is a board
 //!

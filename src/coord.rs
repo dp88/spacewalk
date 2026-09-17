@@ -559,14 +559,23 @@ pub trait Coord:
 
     /// Every direction, in a fixed order.
     ///
-    /// The order is load-bearing: it fixes the layout of the grid's step table, and therefore the
+    /// The order is load-bearing: it fixes the order a grid tries directions in, and therefore the
     /// order every downstream iteration and heap tie-break resolves in. Determinism starts here.
     const DIRS: &'static [Self::Dir];
 
     /// The cell one step from `self` in direction `d`.
     ///
     /// Pure arithmetic — it does not know whether the result is on any board. The grid decides
-    /// that when it builds its step table.
+    /// that when it looks the result up.
+    ///
+    /// # It must be one offset everywhere
+    ///
+    /// A grid finds who can step *into* a cell by undoing this: it subtracts the offset of `d`,
+    /// which it measures at the origin with your `Sub`. So on any one board, `step(d)` must move
+    /// every cell by that same offset. A step may clamp or saturate at the edge of the board, where
+    /// it lands on its own cell and is no edge at all. A world that wraps must wrap its `Add` and
+    /// `Sub` too. [`FullGrid::new`](crate::FullGrid::new) checks every edge and refuses a board
+    /// that breaks this.
     #[must_use]
     fn step(self, d: Self::Dir) -> Self;
 }

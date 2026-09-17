@@ -6,16 +6,16 @@
 //! — so they are not, and answering the second used to mean one forward search per enemy on the
 //! board.
 //!
-//! The grid now keeps the step table reversed, so it is one backward Dijkstra.
+//! The grid can ask who steps *into* a cell, so it is one backward Dijkstra.
 
-use spacewalk::{Adjacency, Coord, Dir8, FullGrid, Grid, Metric, Movement, Sq};
+use spacewalk::{Adjacency, Coord, Dir8, FullGrid, Grid, GridError, Hex, Metric, Movement, Sq};
 
 mod common;
 
 #[test]
 fn on_open_ground_reaching_and_reachable_agree() {
     // The symmetric case. If every step is reversible at the same cost, "where can I go" and "who
-    // can get to me" describe the same set — and if they disagreed here, the reverse table is wrong.
+    // can get to me" describe the same set — and if they disagreed here, the reverse search is wrong.
     let g = FullGrid::square(9, 9, Adjacency::Four);
     let m = Movement::scan(&g, |_| Some(10));
     let centre = g.at(Sq::new(4, 4));
@@ -124,25 +124,66 @@ fn a_blocked_cell_threatens_nobody_and_is_threatened_by_nobody() {
 }
 
 #[test]
-fn in_neighbors_keeps_every_predecessor_even_when_step_is_not_injective() {
-    // The reason the reverse table is a multimap and not a mirror of the step table.
+fn a_step_that_cannot_be_undone_is_refused_when_the_board_is_built() {
+    // The grid keeps no table of in-edges. It finds who steps into a cell by undoing the step, and
+    // that only works when a step is one offset everywhere.
     //
-    // A `step` that clamps sends several cells into one. Mirroring would keep the last writer and
-    // silently drop the others — an enemy who can reach you but never appears on the threat overlay.
+    // A `step` that halves its position sends several cells into one. Undoing it cannot find them
+    // all, and the cost of a silent miss is an enemy who can reach you but never appears on the
+    // threat overlay. So the board is refused, loudly, when it is built.
     common::coord_1d!(Funnel, Down, |x| Funnel(x.0 / 2)); // 4 and 5 both fall into 2
 
-    // A metric of 0, which is the documented answer for a board with genuine multi-cell steps: one
-    // "step" here halves your position, so it can carry you several cells at once and no honest
-    // metric can call that a distance of one. Zero is always an underestimate, so A* degrades into
-    // Dijkstra — slower, still correct. `FullGrid::new` enforces this rather than trusting us.
-    let g = FullGrid::new((0..8).map(Funnel), Funnel::DIRS, Metric::scanning(|_, _| 0));
+    // A metric of 0, so that the metric check passes and the refusal below is about the step.
+    let built = FullGrid::try_new((0..8).map(Funnel), Funnel::DIRS, Metric::scanning(|_, _| 0));
 
-    let two = g.at(Funnel(2));
-    let sources: Vec<i32> = g.in_neighbors(two).map(|(_, i)| g.coord(i).0).collect();
+    assert_eq!(built.unwrap_err(), GridError::StepNotInvertible);
+}
 
-    assert!(sources.contains(&4), "4 falls into 2");
-    assert!(sources.contains(&5), "and so does 5 — both must survive");
-    assert_eq!(sources.len(), 2);
+/// Every edge of a board, read from its far end, must be the same set of edges.
+fn assert_in_edges_mirror_out_edges<B: Grid>(b: &B, what: &str) {
+    let mut out: Vec<(u32, u32)> = b
+        .indices()
+        .flat_map(|i| b.neighbors(i).map(move |(_, j)| (i.get(), j.get())))
+        .collect();
+    let mut inn: Vec<(u32, u32)> = b
+        .indices()
+        .flat_map(|j| b.in_neighbors(j).map(move |(_, i)| (i.get(), j.get())))
+        .collect();
+    out.sort_unstable();
+    inn.sort_unstable();
+
+    assert!(!out.is_empty(), "{what}: the board has edges to compare");
+    assert_eq!(out, inn, "{what}");
+}
+
+#[test]
+fn who_steps_in_is_exactly_who_steps_out_read_backwards() {
+    // `in_neighbors` is computed, not stored, so it has to be held against `neighbors` on every kind
+    // of board: both adjacencies, holes, hexes, a region, and steps that clamp or wrap.
+    assert_in_edges_mirror_out_edges(&FullGrid::square(6, 5, Adjacency::Four), "four-way");
+    assert_in_edges_mirror_out_edges(&FullGrid::square(6, 5, Adjacency::Eight), "eight-way");
+    assert_in_edges_mirror_out_edges(
+        &FullGrid::square(8, 8, Adjacency::Eight).filtered(|c| (c.x + c.y) % 2 == 1),
+        "a board with holes",
+    );
+    assert_in_edges_mirror_out_edges(
+        &FullGrid::hexagon(3).filtered(|c| c != Hex::new(1, -1)),
+        "a hexagon with a hole",
+    );
+
+    let board = FullGrid::square(7, 7, Adjacency::Eight);
+    let blast = board.within(board.at(Sq::new(3, 3)), 1, 2);
+    assert_in_edges_mirror_out_edges(&blast, "a region");
+
+    // The last cell steps onto itself, which is not an edge. Every other edge is one offset.
+    common::coord_1d!(Clamp, East, |x| Clamp((x.0 + 1).min(4)));
+    let clamped = FullGrid::new((0..=4).map(Clamp), Clamp::DIRS, Metric::scanning(|_, _| 0));
+    assert_in_edges_mirror_out_edges(&clamped, "a step that clamps at the edge");
+    assert_eq!(
+        clamped.in_neighbors(clamped.at(Clamp(4))).count(),
+        1,
+        "the clamped cell is still entered from the cell before it"
+    );
 }
 
 #[test]

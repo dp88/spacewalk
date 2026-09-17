@@ -412,8 +412,8 @@ pub trait Grid {
 
         // Bounded by the board, deliberately. A straight line cannot visit more cells than exist,
         // so this changes no correct answer — but a `Coord` whose `step` wraps (a torus world is a
-        // perfectly ordinary thing to want) makes the step table cyclic, and an unbounded walk down
-        // it never returns. `.collect()` on that fills memory until the machine dies.
+        // perfectly ordinary thing to want) makes the steps cyclic, and an unbounded walk down
+        // them never returns. `.collect()` on that fills memory until the machine dies.
         core::iter::successors(self.step(i, d), move |&j| self.step(j, d)).take(self.len())
     }
 
@@ -472,7 +472,7 @@ pub trait Grid {
         };
 
         // Bounded by the board on both legs, for the reason `ray` is: a wrapping `Coord::step`
-        // makes the step table cyclic, and an unbounded walk down it never returns.
+        // makes the steps cyclic, and an unbounded walk down them never returns.
         let mut line: Vec<Idx> = core::iter::successors(behind(i), |&j| behind(j))
             .take(self.len())
             .take_while(|&j| same(j))

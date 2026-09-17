@@ -1,4 +1,4 @@
-//! A whole board, stored: a set of cells, a dense index over them, and one step table.
+//! A whole board, stored: a set of cells, and a dense index over them.
 //!
 //! This is the thing you build. [`FullGrid`] holds the cells and the edges between them; the
 //! vocabulary you ask it questions in is [`Grid`], which it implements — and so does
@@ -16,27 +16,20 @@ use hashbrown::hash_map::Entry;
 use crate::coord::{Coord, Dir6, Dir8, Hex, Idx, Metric, Sq, Tag};
 use crate::grid::{Grid, same_grid, slot};
 use crate::layout::Offset;
-use alloc::vec;
 use alloc::vec::Vec;
-
-/// The step table's empty slot. `u32::MAX` cells will never exist.
-///
-/// The tables below hold bare `u32`, not [`Idx`]. They are this grid's own storage, every entry in
-/// them is this grid's by construction, and a tag on each would be a tag repeated `cells × dirs`
-/// times to say one thing. An [`Idx`] is minted on the way out, in [`FullGrid::idx`].
-const NONE: u32 = u32::MAX;
 
 /// The most cells a grid may hold: 2²⁴, or 16,777,216. A 4096 × 4096 board.
 ///
 /// This is a **memory** limit, not an addressing one, and the difference is the whole point. An
-/// [`Idx`] is a `u32`, so a grid could in principle address four billion cells — but the step table
-/// alone would then want 137GB, and asking for it does not fail cleanly, it takes the machine down
-/// with it. The first version of this guard checked the addressing limit and sailed straight past a
-/// 46341 × 46341 board (2.1 billion cells, a 68GB allocation), because that is *under* four billion.
+/// [`Idx`] is a `u32`, so a grid could in principle address four billion cells — but the cells and
+/// their index would then want well over 100GB, and asking for it does not fail cleanly, it takes
+/// the machine down with it. The first version of this guard checked the addressing limit and
+/// sailed straight past a 46341 × 46341 board (2.1 billion cells), because that is *under* four
+/// billion.
 ///
-/// So the bound is set where memory stays sane: even at eight directions the step table tops out
-/// around half a gigabyte. No game board is anywhere near this. If you genuinely need a bigger
-/// world, you want a chunked one, not a bigger `FullGrid`.
+/// So the bound is set where memory stays sane: a board at the limit holds about half a gigabyte,
+/// and each search over it allocates 200MB more. No game board is anywhere near this. If you
+/// genuinely need a bigger world, you want a chunked one, not a bigger `FullGrid`.
 pub const MAX_CELLS: u64 = 1 << 24;
 
 /// Why a grid constructor could not build the requested board.
@@ -59,13 +52,9 @@ pub enum GridError {
         /// The number of cells requested.
         cells: u64,
     },
-    /// The stored cell-direction table cannot be represented or allocated safely.
-    TooManyEdges {
-        /// The number of cells in the table.
-        cells: u64,
-        /// The number of directions in the table.
-        directions: u64,
-    },
+    /// A step is not the same offset everywhere on the board, so it cannot be undone. See
+    /// [`FullGrid::new`].
+    StepNotInvertible,
     /// A direction moves farther than one unit under the supplied metric.
     MetricDisagrees {
         /// The distance a direction actually spans.
@@ -82,9 +71,11 @@ impl fmt::Display for GridError {
                 f,
                 "the requested board needs {cells} cells; a grid may hold at most {MAX_CELLS}",
             ),
-            Self::TooManyEdges { cells, directions } => write!(
+            Self::StepNotInvertible => write!(
                 f,
-                "a {cells}-cell grid with {directions} directions has too many edge entries",
+                "a step cannot be undone: it is not the same offset everywhere on the board, so \
+                 the grid cannot find who steps into a cell. Two cells that step onto one cell, \
+                 and a portal, both do this",
             ),
             Self::MetricDisagrees { span } => write!(
                 f,
@@ -110,7 +101,7 @@ pub enum Adjacency {
     Eight,
 }
 
-/// A whole board: cells, their dense indices, and the cell each direction leads to.
+/// A whole board: cells, their dense indices, and the directions that lead between them.
 ///
 /// Cells are addressed by [`Idx`], a dense `u32` assigned at construction. Indices are stable for
 /// the grid's lifetime but mean nothing to any other grid — **serialize coordinates, never
@@ -119,8 +110,8 @@ pub enum Adjacency {
 /// # A grid is not saved, it is rebuilt
 ///
 /// `FullGrid` is deliberately not serializable. It holds function pointers (its [`Metric`]), which
-/// have no sensible serialized form — and everything else in it, the index map and the step tables,
-/// is *derived*. Geometry is cheaper to rebuild than to store.
+/// have no sensible serialized form — and the index map beside them is *derived*. Geometry is
+/// cheaper to rebuild than to store.
 ///
 /// So save the grid's **definition**, not the grid: the arguments you built it from. For the shipped
 /// shapes that is `(w, h, adjacency)` or a radius, all of which serialize. For a board of your own,
@@ -154,67 +145,12 @@ pub struct FullGrid<C: Coord> {
     /// board, and 2.8x slower on `visible_from`, which asks this question once per cell it draws a
     /// line to.
     index: HashMap<C, u32>,
-    /// The direction alphabet, fixing the column order of `steps`.
+    /// The direction alphabet. Its order is the order every step is tried in.
     dirs: Vec<C::Dir>,
-    /// Flat, `cells.len() * dirs.len()`. `steps[i * dirs.len() + d]` is the cell reached by
-    /// leaving cell `i` in direction `dirs[d]`, or [`NONE`].
-    ///
-    /// Flat and direction-indexed, not a compacted neighbour list. The distinction matters: a
-    /// compacted list cannot answer "which of these is my north-east?", and a checkers man that
-    /// may only move forward needs exactly that.
-    steps: Vec<u32>,
-    /// The step table, reversed: who can step *into* each cell.
-    ///
-    /// A multimap in compressed-row form, not a mirror of `steps`, and that is deliberate. Mirroring
-    /// assumes each cell has at most one predecessor per direction — true of any lattice, false the
-    /// moment a caller's `step` clamps at an edge or leads several cells into one portal. A mirror
-    /// would silently keep the last writer and lose the rest, which in a game means an enemy who can
-    /// reach you and does not appear on the threat overlay. This holds all of them.
-    back: Back,
     /// How distance is measured and range queries are answered. See [`Metric`].
     metric: Metric<C>,
     /// This board's numbering, hashed from `cells`. See [`Tag`].
     tag: Tag,
-}
-
-/// In-edges, in compressed-row form: the predecessors of cell `j` are `from[start[j]..start[j+1]]`,
-/// each with the direction it would travel in.
-#[derive(Debug, Clone, Default)]
-struct Back {
-    start: Vec<u32>,
-    from: Vec<u32>,
-    dir: Vec<u32>,
-}
-
-impl Back {
-    /// Invert the step table in two passes: count what arrives where, then place it.
-    fn of(steps: &[u32], cells: usize, dirs: usize) -> Self {
-        let mut start = vec![0u32; cells + 1];
-        for &j in steps {
-            if j != NONE {
-                start[j as usize + 1] += 1;
-            }
-        }
-        for k in 1..start.len() {
-            start[k] += start[k - 1];
-        }
-
-        let edges = *start.last().unwrap_or(&0) as usize;
-        let (mut from, mut dir) = (vec![0; edges], vec![0u32; edges]);
-        let mut at = start.clone();
-
-        for (slot, &j) in steps.iter().enumerate() {
-            if j == NONE {
-                continue;
-            }
-            let put = at[j as usize] as usize;
-            from[put] = (slot / dirs) as u32;
-            dir[put] = (slot % dirs) as u32;
-            at[j as usize] += 1;
-        }
-
-        Self { start, from, dir }
-    }
 }
 
 impl<C: Coord> FullGrid<C> {
@@ -230,18 +166,36 @@ impl<C: Coord> FullGrid<C> {
     /// diagonal is two cells away, so it stands beside an enemy unable to swing at it. The check
     /// costs one metric call per edge, in the loop that walks the edges anyway.
     ///
-    /// If your board has genuine multi-cell steps — portals, jumps, a conveyor that carries you
-    /// three cells — no honest metric can call those one step. Give it a metric that returns 0:
-    /// always an underestimate, so A\* degrades into Dijkstra, which is slower and still correct.
+    /// If your board has genuine multi-cell steps — a jump, a conveyor that carries you three
+    /// cells — no honest metric can call those one step. Give it a metric that returns 0: always an
+    /// underestimate, so A\* degrades into Dijkstra, which is slower and still correct.
     ///
     /// For a coordinate of your own, [`Metric::scanning`] is the safe default: it asks nothing of
     /// your metric beyond `distance`, and range queries fall back to scanning the board.
     ///
+    /// # A step must be one offset everywhere
+    ///
+    /// The grid keeps no table of steps. It finds where a direction leads by stepping the
+    /// coordinate and looking the result up. It finds who can step *into* a cell by undoing the
+    /// step: it subtracts the direction's offset, which it measures at the origin. So `step(d)`
+    /// must move every cell of the board by that one offset, as the coordinate's own `Sub`
+    /// measures it.
+    ///
+    /// Two cells that step onto one cell break that rule, and so does a portal in one corner of
+    /// the board. On such a board [`Grid::reaching`] would miss an enemy who can reach you. So this
+    /// too is *checked*: every edge is undone once here, and a board with an edge that does not
+    /// come back is refused.
+    ///
+    /// A step may still clamp or saturate at the edge of the board. It then lands on its own cell,
+    /// and a step onto your own cell is not an edge. A world that wraps is fine too, when its
+    /// `Add` and `Sub` wrap with it; `tests/robust.rs` builds one.
+    ///
     /// # Panics
     ///
-    /// If a single step covers more than one unit of `metric` distance (see above), or if the cells
-    /// exceed [`MAX_CELLS`] — checked as the iterator is consumed, so an unbounded one stops at the
-    /// limit rather than being counted to exhaustion first.
+    /// If a single step covers more than one unit of `metric` distance, or if a step cannot be
+    /// undone (see above), or if the cells exceed [`MAX_CELLS`] — checked as the iterator is
+    /// consumed, so an unbounded one stops at the limit rather than being counted to exhaustion
+    /// first.
     #[must_use]
     pub fn new(cells: impl IntoIterator<Item = C>, dirs: &[C::Dir], metric: Metric<C>) -> Self {
         Self::try_new(cells, dirs, metric).unwrap_or_else(|error| panic!("{error}"))
@@ -250,8 +204,9 @@ impl<C: Coord> FullGrid<C> {
     /// Fallibly build a grid from any set of cells, direction alphabet, and distance metric.
     ///
     /// This has the same duplicate handling, ordering, and validation as [`FullGrid::new`], but
-    /// returns a [`GridError`] instead of panicking for invalid dimensions, oversized boards, or a
-    /// metric that disagrees with the direction alphabet. Allocation failure is not recoverable.
+    /// returns a [`GridError`] instead of panicking for invalid dimensions, oversized boards, a
+    /// metric that disagrees with the direction alphabet, or a step that cannot be undone.
+    /// Allocation failure is not recoverable.
     pub fn try_new(
         cells: impl IntoIterator<Item = C>,
         dirs: &[C::Dir],
@@ -274,29 +229,15 @@ impl<C: Coord> FullGrid<C> {
             }
         }
 
-        let edge_count = ordered
-            .len()
-            .checked_mul(dirs.len())
-            .ok_or(GridError::TooManyEdges {
-                cells: ordered.len() as u64,
-                directions: dirs.len() as u64,
-            })?;
-        if edge_count > u32::MAX as usize {
-            return Err(GridError::TooManyEdges {
-                cells: ordered.len() as u64,
-                directions: dirs.len() as u64,
-            });
-        }
-        let mut steps = Vec::with_capacity(edge_count);
-        for (i, &c) in ordered.iter().enumerate() {
+        for &c in &ordered {
             for &d in dirs {
-                let j = index.get(&c.step(d)).copied().unwrap_or(NONE);
+                let to = c.step(d);
 
                 // A step onto your own cell is not an edge, it is a fixed point — and it is what a
                 // clamping or saturating `Coord::step` produces at the board's edge. Left in, it
-                // gives `ray` an infinite loop and the search a zero-length cycle.
-                if j as usize == i {
-                    steps.push(NONE);
+                // gives `ray` an infinite loop and the search a zero-length cycle. `landing`
+                // refuses it for the same reason.
+                if to == c || !index.contains_key(&to) {
                     continue;
                 }
 
@@ -307,25 +248,25 @@ impl<C: Coord> FullGrid<C> {
                 // the cheapest path.
                 //
                 // It costs one metric call per edge, in the loop that was walking the edges anyway.
-                if j != NONE {
-                    let span = metric.distance(c, ordered[j as usize]);
-                    if span > 1 {
-                        return Err(GridError::MetricDisagrees { span });
-                    }
+                let span = metric.distance(c, to);
+                if span > 1 {
+                    return Err(GridError::MetricDisagrees { span });
                 }
 
-                steps.push(j);
+                // `in_neighbors` finds this edge from its far end, by undoing the step. If that does
+                // not lead back here, the edge would be missing from every threat map. Refuse it
+                // now, not silently later.
+                if Self::source(to, d) != c {
+                    return Err(GridError::StepNotInvertible);
+                }
             }
         }
 
-        let back = Back::of(&steps, ordered.len(), dirs.len());
         Ok(Self {
             tag: Tag::of(ordered.iter()),
             cells: ordered,
             index,
             dirs: dirs.to_vec(),
-            steps,
-            back,
             metric,
         })
     }
@@ -335,9 +276,24 @@ impl<C: Coord> FullGrid<C> {
         Idx::new(self.tag, i)
     }
 
-    /// A step-table slot as an `Option`: the sentinel [`NONE`] becomes `None`.
-    fn reached(&self, j: u32) -> Option<Idx> {
-        (j != NONE).then(|| self.idx(j))
+    /// The cell that `c` steps onto heading `d`, if it is on the board and is not `c` itself.
+    fn landing(&self, c: C, d: C::Dir) -> Option<Idx> {
+        let to = c.step(d);
+        if to == c {
+            return None;
+        }
+        self.index.get(&to).map(|&j| self.idx(j))
+    }
+
+    /// The coordinate that steps onto `c` heading `d`: `c` less the offset of `d`.
+    ///
+    /// The offset is measured at the origin, not at `c`. A step that clamps or saturates is bent
+    /// at the edge of the board, and `c` may be that edge.
+    fn source(c: C, d: C::Dir) -> C {
+        // Deliberate: `c - c` is the zero vector, and `Coord` has no other way to name the origin.
+        #[allow(clippy::eq_op)]
+        let origin = c - c;
+        c - (origin.step(d) - origin)
     }
 
     /// A **new** board holding only the cells that pass `keep`.
@@ -398,30 +354,30 @@ impl<C: Coord> Grid for FullGrid<C> {
     }
 
     fn step(&self, i: Idx, d: C::Dir) -> Option<Idx> {
-        let cell = slot(self.len(), self.tag, i);
-        let at = self.dirs.iter().position(|&x| x == d)?;
-        self.reached(self.steps[cell * self.dirs.len() + at])
+        let c = self.cells[slot(self.len(), self.tag, i)];
+        if !self.dirs.contains(&d) {
+            return None;
+        }
+        self.landing(c, d)
     }
 
     fn neighbors(&self, i: Idx) -> impl Iterator<Item = (C::Dir, Idx)> {
-        let base = slot(self.len(), self.tag, i) * self.dirs.len();
+        let c = self.cells[slot(self.len(), self.tag, i)];
         self.dirs
             .iter()
-            .enumerate()
-            .filter_map(move |(at, &d)| self.reached(self.steps[base + at]).map(|j| (d, j)))
+            .filter_map(move |&d| self.landing(c, d).map(|j| (d, j)))
     }
 
     fn in_neighbors(&self, j: Idx) -> impl Iterator<Item = (C::Dir, Idx)> {
-        let cell = slot(self.len(), self.tag, j);
-        let (lo, hi) = (
-            self.back.start[cell] as usize,
-            self.back.start[cell + 1] as usize,
-        );
-        (lo..hi).map(move |k| {
-            (
-                self.dirs[self.back.dir[k] as usize],
-                self.idx(self.back.from[k]),
-            )
+        let c = self.cells[slot(self.len(), self.tag, j)];
+        self.dirs.iter().filter_map(move |&d| {
+            let from = Self::source(c, d);
+            // `try_new` proved that every real edge passes this test. It still runs here, because
+            // `from` may be a cell whose own step is bent at the edge and does not reach `c`.
+            if from == c || from.step(d) != c {
+                return None;
+            }
+            self.index.get(&from).map(|&i| (d, self.idx(i)))
         })
     }
 
@@ -654,10 +610,7 @@ mod tests {
             GridError::InvalidDimensions { w: -1, h: 2 },
             GridError::InvalidRadius { radius: -1 },
             GridError::TooManyCells { cells: 1 << 25 },
-            GridError::TooManyEdges {
-                cells: 1,
-                directions: 1,
-            },
+            GridError::StepNotInvertible,
             GridError::MetricDisagrees { span: 2 },
         ];
         for error in errors {

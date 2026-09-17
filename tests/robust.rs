@@ -344,7 +344,7 @@ fn a_wide_direction_alphabet_keeps_reverse_edges_correct() {
 const W: i32 = 8;
 
 /// A one-dimensional world that wraps around, so stepping east forever returns you to where you
-/// began. Perfectly reasonable — and it makes the step table *cyclic*.
+/// began. Perfectly reasonable — and it makes the steps *cyclic*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Ring(i32);
 
