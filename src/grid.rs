@@ -5,9 +5,9 @@
 //! [`FullGrid`], a board you built; [`RectGrid`](crate::RectGrid), a rectangle it computes; and
 //! [`SubGrid`], a region of either.
 //!
-//! The trait asks for eleven methods and gives back twenty. Everything from `ray` to `path` is
-//! written in terms of the geometry primitives below and needs no storage of its own, which is why
-//! a region of a board can be a board without copying one.
+//! The trait asks for a few primitives and gives back everything else. Everything from `ray` to
+//! `path` is written in terms of the geometry primitives below and needs no storage of its own,
+//! which is why a region of a board can be a board without copying one.
 
 use crate::coord::{Coord, Idx, Metric, Tag};
 // The trait no longer names a `FullGrid`, but the documentation below links to one throughout.
