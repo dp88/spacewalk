@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.1 — 2026-09-17
+
 - `Graph<K>` and `GraphError`: pathfinding with no grid. A graph is built from
   a plain list of `(from, to, cost)` edges over nodes named by a type of your
   own. It answers `path`, `reachable`, and `reaching` with the same search
