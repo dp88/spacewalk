@@ -40,9 +40,9 @@ assert_eq!(route.cells(&grid).count(), 15); // the start is included
 
 ## Why
 
-- **One vocabulary, three boards.** Code written against the `Grid` trait
-  runs on a stored cell set (`FullGrid`), an arithmetic rectangle
-  (`RectGrid`), or a borrowed region (`SubGrid`) without a change of course.
+- **One vocabulary, whole board or part.** Code written against the `Grid`
+  trait runs on a board you built (`FullGrid`) or a borrowed region of one
+  (`SubGrid`) without a change of course.
 - **Any shape.** Square, hex, disc, and tile-map hex rectangles ship as
   constructors; a custom `Coord` implementation opens anything else,
   including three-dimensional boards.

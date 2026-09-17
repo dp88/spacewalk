@@ -19,6 +19,10 @@ All notable changes to this project are documented in this file.
   at the edge of the board, and a world whose `Add` and `Sub` wrap, still work.
 - **Breaking:** `GridError::TooManyEdges` is gone. With no table of edges there
   is no edge limit to pass.
+- **Breaking:** `RectGrid` is gone. It existed so that a large rectangle could
+  avoid the tables that `FullGrid` no longer has. Use
+  `FullGrid::square(w, h, adjacency)`: it gives the same cells and the same
+  indices. It holds about 34 bytes a cell, where `RectGrid` held nothing.
 
 ## 0.2.1 — 2026-09-17
 

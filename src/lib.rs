@@ -55,19 +55,11 @@
 //! and a game with a genuinely different geometry implements [`Coord`]. That is a few dozen lines;
 //! `tests/chess3d.rs` builds a three-layer chess board without touching this crate.
 //!
-//! # A plain rectangle stores nothing
-//!
-//! A [`FullGrid`] holds any set of cells, so it must store the cells and an index over them. On a
-//! full `w × h` rectangle each of those is arithmetic, and [`RectGrid`] is that arithmetic: same
-//! answers, same indices, three fields whatever the size of the board. It is what a large outdoor
-//! map wants. `FullGrid` is what everything else wants.
-//!
 //! # A region of a board is a board
 //!
-//! [`Grid`] is the vocabulary — every question above, asked of anything that is a board. Three
-//! things answer it. [`FullGrid`] is one you built and [`RectGrid`] one it computes. [`SubGrid`] is
-//! *part* of either, and it is a board in its own right: it has its own edges, its own components,
-//! its own paths.
+//! [`Grid`] is the vocabulary — every question above, asked of anything that is a board. Two
+//! things answer it. [`FullGrid`] is a board you built. [`SubGrid`] is *part* of one, and it is a
+//! board in its own right: it has its own edges, its own components, its own paths.
 //!
 //! That is what a highlighted range is. Ask for one, and you get the thing you draw **and** the
 //! thing you then reason over:
@@ -254,7 +246,6 @@ pub mod grid;
 pub mod height;
 pub mod layout;
 pub mod path;
-pub mod rect;
 /// A\* and Dijkstra over a board's dense indices. Private: [`Grid`] is the way in.
 mod search;
 pub mod square;
@@ -268,7 +259,6 @@ pub use grid::{Dir, Grid, MAX_SIGHT, Sight};
 pub use height::{climb_gate, height_gate};
 pub use layout::{HexLayout, Offset, Orientation, Pt, SqLayout};
 pub use path::{Cost, Movement, MovementError, Path, Step};
-pub use rect::RectGrid;
 pub use square::{CornerRule, corner_gate};
 pub use sub::SubGrid;
 
@@ -289,7 +279,7 @@ pub mod prelude {
     pub use crate::{
         Adjacency, CellMap, Coord, CornerRule, Cost, Dir, Dir6, Dir8, FullGrid, Grid, Hex,
         HexLayout, Idx, Lerp, MAX_CELLS, MAX_SIGHT, Metric, Movement, MovementError, Offset,
-        Orientation, Path, Pt, RectGrid, Sight, Sq, SqLayout, Step, SubGrid, Tag, climb_gate,
-        corner_gate, height_gate,
+        Orientation, Path, Pt, Sight, Sq, SqLayout, Step, SubGrid, Tag, climb_gate, corner_gate,
+        height_gate,
     };
 }

@@ -398,8 +398,7 @@ impl Tag {
     /// Derive a tag from a board's cells, in index order.
     ///
     /// The iterator is **never consumed in release**, so a caller may hand over one that would be
-    /// expensive to walk — [`RectGrid`](crate::RectGrid) generates its cells for exactly this and
-    /// pays nothing for them in a shipped build.
+    /// expensive to walk, and pay nothing for it in a shipped build.
     #[cfg(debug_assertions)]
     pub fn of<H: Hash>(items: impl IntoIterator<Item = H>) -> Self {
         let mut h = Fnv(0xcbf2_9ce4_8422_2325);

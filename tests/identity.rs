@@ -14,7 +14,7 @@
 //! nothing, and the mistake is caught while you are making it. The tests run in both profiles and
 //! say what each one promises.
 
-use spacewalk::{Adjacency, CellMap, FullGrid, Grid, Idx, Movement, RectGrid, Sq};
+use spacewalk::{Adjacency, CellMap, FullGrid, Grid, Idx, Sq};
 
 /// The panic message, or `None` if the call did not panic.
 fn caught(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
@@ -163,27 +163,6 @@ fn a_rebuilt_board_keeps_its_predecessors_numbering() {
     for i in original.indices() {
         assert_eq!(restored.coord(i), original.coord(i), "index {i} survived");
     }
-}
-
-#[test]
-fn a_rectangle_and_the_stored_board_of_the_same_shape_agree() {
-    // The crate promises these two give "same answers, same indices". That is worth having only if
-    // an index really does travel between them, so it is checked rather than asserted in prose.
-    let stored = FullGrid::square(9, 7, Adjacency::Eight);
-    let rect = RectGrid::new(9, 7, Adjacency::Eight);
-
-    for i in stored.indices() {
-        assert_eq!(rect.coord(i), stored.coord(i), "index {i} means one cell");
-    }
-
-    let from = stored.at(Sq::new(0, 0));
-    let to = rect.at(Sq::new(8, 6));
-    let walk = Movement::uniform(&rect, 1);
-    assert_eq!(
-        rect.path(from, to, &walk).unwrap().steps(),
-        stored.path(from, to, &walk).unwrap().steps(),
-        "including one taken from each",
-    );
 }
 
 #[test]

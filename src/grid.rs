@@ -1,9 +1,8 @@
 //! What every board can answer, whatever it is made of.
 //!
-//! [`Grid`] is the vocabulary: cells, the steps between them, distance, sight, and reach. Three
+//! [`Grid`] is the vocabulary: cells, the steps between them, distance, sight, and reach. Two
 //! things speak it, and code written against it does not care which it was handed —
-//! [`FullGrid`], a board you built; [`RectGrid`](crate::RectGrid), a rectangle it computes; and
-//! [`SubGrid`], a region of either.
+//! [`FullGrid`], a board you built, and [`SubGrid`], a region of one.
 //!
 //! The trait asks for a few primitives and gives back everything else. Everything from `ray` to
 //! `path` is written in terms of the geometry primitives below and needs no storage of its own,
@@ -153,9 +152,9 @@ pub(crate) fn cost_ceiling(len: usize) -> Cost {
 /// search walks neighbours.
 ///
 /// Write generic code instead — `fn f<B: Grid>(g: &B, c: B::Cell)` reads no worse and costs
-/// nothing, and it takes a [`FullGrid`], a [`RectGrid`](crate::RectGrid), and a [`SubGrid`] alike.
-/// If you genuinely must choose a board shape at runtime, an `enum` over the two or three you
-/// actually ship is the answer, and it stays static.
+/// nothing, and it takes a [`FullGrid`] and a [`SubGrid`] alike. If you genuinely must choose a
+/// board shape at runtime, an `enum` over the two or three you actually ship is the answer, and it
+/// stays static.
 ///
 /// [`to_root`]: Grid::to_root
 /// [`of_root`]: Grid::of_root
@@ -167,8 +166,7 @@ pub trait Grid {
     /// from for a [`SubGrid`].
     ///
     /// A region is numbered against its root, so this is what [`to_root`](Grid::to_root) and every
-    /// range query speak in terms of. It is an associated type rather than [`FullGrid`] because a
-    /// whole board need not store its cells — [`RectGrid`](crate::RectGrid) computes them.
+    /// range query speak in terms of.
     type Root: Grid<Cell = Self::Cell>;
 
     // -- required: the geometry primitives ---------------------------------------------------
