@@ -33,6 +33,12 @@ All notable changes to this project are documented in this file.
   `Grid::tag` moves to the private supertrait, and `Tag` is no longer public.
 - **Breaking:** the `Lerp` alias is gone. `Metric::with_lerp` takes the same
   function pointer, written out: `fn(a: C, b: C, t: u32, n: u32) -> C`.
+- **Breaking:** the crate root no longer re-exports the screen layout types or
+  the rule gates. Import `HexLayout`, `SqLayout`, `Pt`, and `Orientation` from
+  `spacewalk::layout`; `corner_gate` and `CornerRule` from `spacewalk::square`;
+  `height_gate` and `climb_gate` from `spacewalk::height`. Those paths have
+  always worked, so a consumer can move to them before it upgrades. `Offset`
+  stays at the root, because `FullGrid::hex_rect` takes one.
 
 ## 0.2.1 — 2026-09-17
 

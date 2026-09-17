@@ -15,9 +15,8 @@
 //! - the cell you pick is the cell whose centre is nearest (or it is not a Voronoi cell)
 //! - offset coordinates land on the pixel a tilemap would draw them at (or interop is a lie)
 
-use spacewalk::{
-    Coord, Dir6, FullGrid, Grid, Hex, HexLayout, Offset, Orientation, Pt, Sq, SqLayout,
-};
+use spacewalk::layout::{HexLayout, Orientation, Pt, SqLayout};
+use spacewalk::{Coord, Dir6, FullGrid, Grid, Hex, Offset, Sq};
 
 /// Pixels. Everything here is exact to a hundredth of one.
 const EPS: f32 = 0.01;

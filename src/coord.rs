@@ -246,7 +246,7 @@ fn sq_lerp(a: Sq, b: Sq, t: u32, n: u32) -> Sq {
 /// `q + r + s = 0` invariant, so exactly one of them is recomputed from the other two — the one
 /// that was rounded least honestly.
 ///
-/// Shared by [`hex_lerp`] and by [`HexLayout::hex_at`](crate::HexLayout::hex_at): drawing a line
+/// Shared by [`hex_lerp`] and by [`HexLayout::hex_at`](crate::layout::HexLayout::hex_at): drawing a line
 /// and picking the hex under the mouse are the same question — *which cell is this fractional
 /// point in?* — so they must not be two pieces of code that can disagree.
 ///

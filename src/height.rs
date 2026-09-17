@@ -3,7 +3,7 @@
 //! Height is game state, not geometry. A cell's ground level belongs beside its terrain and its
 //! occupant, in whatever you already keep those in — a [`CellMap`](crate::CellMap) is the usual
 //! answer. So this module holds no heights. It holds the two rules that read them, as gates you put
-//! in front of your own closures, exactly as [`corner_gate`](crate::corner_gate) does. The grid
+//! in front of your own closures, exactly as [`corner_gate`](crate::square::corner_gate) does. The grid
 //! stays pure geometry.
 //!
 //! Both gates are integer throughout. Sight and cost must give the same answer on every machine
@@ -92,7 +92,7 @@ pub fn height_gate<'a, B: Grid + ?Sized>(
 /// A gate that answers: may this step be taken, given how far it climbs?
 ///
 /// Returns a predicate over a [`Step`], so it composes with your cost function the way
-/// [`corner_gate`](crate::corner_gate) does. `z` is the ground level of a cell, and `max_rise` the
+/// [`corner_gate`](crate::square::corner_gate) does. `z` is the ground level of a cell, and `max_rise` the
 /// greatest ascent one step may make. Zero forbids all climbing. A negative value also refuses
 /// level ground and any descent shallower than its magnitude.
 ///

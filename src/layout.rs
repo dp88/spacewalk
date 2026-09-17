@@ -6,7 +6,8 @@
 //! is all it is.
 //!
 //! ```
-//! use spacewalk::{FullGrid, Grid, Hex, HexLayout, Pt};
+//! use spacewalk::layout::{HexLayout, Pt};
+//! use spacewalk::{FullGrid, Grid, Hex};
 //!
 //! let g = FullGrid::hexagon(4);
 //! let layout = HexLayout::pointy(Pt::new(32.0, 32.0)).at(Pt::new(400.0, 300.0));
@@ -180,7 +181,8 @@ impl HexLayout {
     /// `Option`, so a click outside the board is `None` without a special case.
     ///
     /// ```
-    /// # use spacewalk::{FullGrid, Grid, HexLayout, Pt};
+    /// # use spacewalk::layout::{HexLayout, Pt};
+    /// # use spacewalk::{FullGrid, Grid};
     /// let g = FullGrid::hexagon(3);
     /// let layout = HexLayout::pointy(Pt::new(20.0, 20.0));
     ///
@@ -212,7 +214,8 @@ impl HexLayout {
     /// The six vertices, in order, for drawing the outline.
     ///
     /// ```
-    /// # use spacewalk::{FullGrid, Grid, Hex, HexLayout, Pt};
+    /// # use spacewalk::layout::{HexLayout, Pt};
+    /// # use spacewalk::{FullGrid, Grid, Hex};
     /// let layout = HexLayout::pointy(Pt::new(10.0, 10.0));
     /// let c = layout.corners(Hex::new(0, 0));
     ///
@@ -274,7 +277,8 @@ impl SqLayout {
     /// The cell containing a pixel — the cell under the mouse.
     ///
     /// ```
-    /// # use spacewalk::{Adjacency, FullGrid, Grid, Pt, Sq, SqLayout};
+    /// # use spacewalk::layout::{Pt, SqLayout};
+    /// # use spacewalk::{Adjacency, FullGrid, Grid, Sq};
     /// let g = FullGrid::square(8, 8, Adjacency::Four);
     /// let layout = SqLayout::new(Pt::new(32.0, 32.0));
     ///

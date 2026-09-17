@@ -88,10 +88,11 @@
 //! # Height is game state, like everything else
 //!
 //! A cell's ground level is not geometry, so the grid does not hold it. It goes in a [`CellMap`]
-//! beside your terrain, and two gates read it: [`height_gate`] for what a hill hides,
-//! [`climb_gate`] for what a ledge refuses.
+//! beside your terrain, and two gates in [`height`] read it: [`height_gate`](height::height_gate)
+//! for what a hill hides, [`climb_gate`](height::climb_gate) for what a ledge refuses.
 //!
 //! ```
+//! use spacewalk::height::height_gate;
 //! use spacewalk::prelude::*;
 //!
 //! let g = FullGrid::square(9, 3, Adjacency::Eight);
@@ -113,8 +114,8 @@
 //! [`Grid::visible_from`] remain as compatibility wrappers that throw the target away.
 //!
 //! Movement needed nothing new. A climb is priced by the cell entered and the direction of arrival,
-//! which is the river and the one-way ledge above; [`climb_gate`] only adds the limit past which a
-//! step is refused outright.
+//! which is the river and the one-way ledge above; [`climb_gate`](height::climb_gate) only adds the
+//! limit past which a step is refused outright.
 //!
 //! # Routes without a grid
 //!
@@ -130,7 +131,8 @@
 //! ever reaches a [`Cost`] or a [`Metric`], so pathfinding stays integer and stays reproducible.
 //!
 //! ```
-//! use spacewalk::{FullGrid, Grid, HexLayout, Pt};
+//! use spacewalk::layout::{HexLayout, Pt};
+//! use spacewalk::{FullGrid, Grid};
 //!
 //! let g = FullGrid::hexagon(4);
 //! let layout = HexLayout::pointy(Pt::new(32.0, 32.0)).at(Pt::new(400.0, 300.0));
@@ -192,8 +194,8 @@
 //! # Feature flags
 //!
 //! - `serde` (off by default): `Serialize`/`Deserialize` on every plain-data type — [`Sq`],
-//!   [`Hex`], [`Dir8`], [`Dir6`], [`Adjacency`], [`Pt`], [`Orientation`], [`HexLayout`],
-//!   [`SqLayout`], [`Offset`], and [`CellMap<T>`](CellMap) whenever `T` is. [`FullGrid`] and
+//!   [`Hex`], [`Dir8`], [`Dir6`], [`Adjacency`], [`Offset`], the [`layout`] types, and
+//!   [`CellMap<T>`](CellMap) whenever `T` is. [`FullGrid`] and
 //!   [`Metric`] are deliberately not serializable: a grid is rebuilt from its cells, and a metric
 //!   holds function pointers. `tests/save.rs` shows what to persist instead — coordinates, never
 //!   indices, and a `CellMap` only alongside the cells that fix its order.
@@ -258,10 +260,8 @@ pub use coord::{Coord, Dir6, Dir8, Hex, Idx, Metric, Sq};
 pub use full::{Adjacency, FullGrid, GridError, MAX_CELLS};
 pub use graph::{Graph, GraphError};
 pub use grid::{Dir, Grid, MAX_SIGHT, Sight};
-pub use height::{climb_gate, height_gate};
-pub use layout::{HexLayout, Offset, Orientation, Pt, SqLayout};
+pub use layout::Offset;
 pub use path::{Cost, Movement, MovementError, Path, Step};
-pub use square::{CornerRule, corner_gate};
 pub use sub::SubGrid;
 
 /// Everything you need to build a board and ask it something.
@@ -279,8 +279,7 @@ pub use sub::SubGrid;
 /// ```
 pub mod prelude {
     pub use crate::{
-        Adjacency, CellMap, Coord, CornerRule, Cost, Dir, Dir6, Dir8, FullGrid, Grid, Hex,
-        HexLayout, Idx, MAX_CELLS, MAX_SIGHT, Metric, Movement, MovementError, Offset, Orientation,
-        Path, Pt, Sight, Sq, SqLayout, Step, SubGrid, climb_gate, corner_gate, height_gate,
+        Adjacency, CellMap, Coord, Cost, Dir, Dir6, Dir8, FullGrid, Grid, Hex, Idx, MAX_CELLS,
+        MAX_SIGHT, Metric, Movement, MovementError, Offset, Path, Sight, Sq, Step, SubGrid,
     };
 }
