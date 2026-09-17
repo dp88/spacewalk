@@ -623,11 +623,9 @@ mod tests {
     #[test]
     fn coordinate_facing_movement_constructors_price_their_coordinates() {
         let g = FullGrid::square(3, 1, Adjacency::Four);
+        let (from, to) = (g.at(Sq::new(0, 0)), g.at(Sq::new(2, 0)));
         let by_cell = Movement::cell_cost(&g, |cell| (cell != Sq::new(1, 0)).then_some(10));
-        assert!(
-            g.path_between(Sq::new(0, 0), Sq::new(2, 0), &by_cell)
-                .is_none()
-        );
+        assert!(g.path(from, to, &by_cell).is_none());
 
         let by_edge = Movement::edge_cost(&g, |from, to, dir| {
             Some(if from.x == 0 && to.x == 1 && dir == Dir8::E {
@@ -636,11 +634,6 @@ mod tests {
                 10
             })
         });
-        assert_eq!(
-            g.path_between(Sq::new(0, 0), Sq::new(2, 0), &by_edge)
-                .unwrap()
-                .cost(),
-            11
-        );
+        assert_eq!(g.path(from, to, &by_edge).unwrap().cost(), 11);
     }
 }

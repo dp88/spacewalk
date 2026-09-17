@@ -123,15 +123,6 @@ impl<'a, C: Coord> SubGrid<'a, C> {
         self.cells.iter().map(move |&i| Idx::new(tag, i))
     }
 
-    /// This region's cells as indices in its root board.
-    ///
-    /// This is the coordinate-first name for [`root_indices`](Self::root_indices): use it when
-    /// passing a region's cells to a root-owned [`CellMap`](crate::CellMap) or another root query.
-    #[must_use = "iterate the region's root indices"]
-    pub fn indices_in_root(&self) -> impl Iterator<Item = Idx> + '_ {
-        self.root_indices()
-    }
-
     /// Mint one of the root's indices from a slot in `cells`.
     fn of_cells(&self, at: usize) -> Idx {
         Idx::new(self.root.tag(), self.cells[at])

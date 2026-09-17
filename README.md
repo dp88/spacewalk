@@ -30,8 +30,9 @@ let movement = Movement::cell_cost(&grid, |cell| {
     Some(if mud.contains(&cell) { 30 } else { 10 })
 });
 
+let (from, to) = (grid.at(Sq::new(0, 0)), grid.at(Sq::new(7, 7)));
 let route = grid
-    .path_between(Sq::new(0, 0), Sq::new(7, 7), &movement)
+    .path(from, to, &movement)
     .expect("the route should be open");
 
 assert_eq!(route.len(), 14);

@@ -39,6 +39,14 @@ All notable changes to this project are documented in this file.
   `height_gate` and `climb_gate` from `spacewalk::height`. Those paths have
   always worked, so a consumer can move to them before it upgrades. `Offset`
   stays at the root, because `FullGrid::hex_rect` takes one.
+- **Breaking:** the seven coordinate twins are gone from `Grid`: `step_from`,
+  `within_cell`, `visible_from_cell`, `component_from`, `path_between`,
+  `reachable_from`, and `reaching_cell`. Each was `index_of`, one call, and a
+  map back. Indices go in through `at` and `index_of`; coordinates come out
+  through `coord`, `cells`, and `coords_of`. So `g.path_between(a, b, &m)`
+  becomes `g.path(g.at(a), g.at(b), &m)`.
+- **Breaking:** `SubGrid::indices_in_root` is gone. It was a second name for
+  `SubGrid::root_indices`.
 
 ## 0.2.1 — 2026-09-17
 
