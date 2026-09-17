@@ -13,6 +13,8 @@ All notable changes to this project are documented in this file.
   implement it over storage of its own. Only this crate mints an `Idx`, so the
   trait is a bound to write code against, and `Coord` is the extension point.
   The stale method counts in the same documentation are gone.
+- The `GridError::MetricDisagrees` message no longer holds a stray `+` and a
+  run of spaces, which a broken line continuation had left in it.
 
 ## 0.2.0 — 2026-08-27
 

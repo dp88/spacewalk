@@ -88,7 +88,8 @@ impl fmt::Display for GridError {
             ),
             Self::MetricDisagrees { span } => write!(
                 f,
-                "the metric disagrees with the directions: a step covers {span} units, but a +                 step must cover at most one",
+                "the metric disagrees with the directions: a step covers {span} units, but a \
+                 step must cover at most one",
             ),
         }
     }
@@ -642,7 +643,29 @@ impl FullGrid<Hex> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
     use alloc::vec;
+
+    #[test]
+    fn every_error_reads_as_one_sentence() {
+        // A broken line continuation once left "a +" and a run of spaces inside the
+        // `MetricDisagrees` message. A run of spaces is how that class of slip shows.
+        let errors = [
+            GridError::InvalidDimensions { w: -1, h: 2 },
+            GridError::InvalidRadius { radius: -1 },
+            GridError::TooManyCells { cells: 1 << 25 },
+            GridError::TooManyEdges {
+                cells: 1,
+                directions: 1,
+            },
+            GridError::MetricDisagrees { span: 2 },
+        ];
+        for error in errors {
+            let message = error.to_string();
+            assert!(!message.contains("  "), "{message:?}");
+            assert!(!message.contains('+'), "{message:?}");
+        }
+    }
 
     #[test]
     fn a_rectangle_has_width_times_height_cells() {
