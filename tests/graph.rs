@@ -107,9 +107,9 @@ fn a_graph_and_a_grid_agree_about_the_same_map() {
     // The two are separate callers of one search engine. Give them the same edges and the same
     // costs, and they must find routes of the same cost and the same reach.
     let grid = FullGrid::square(7, 7, Adjacency::Eight);
-    let wall = |c: Sq| c.x == 3 && c.y != 5;
+    let blocked = |c: Sq| c.x == 3 && c.y != 5;
     let price = |to: Sq, diagonal: bool| {
-        (!wall(to)).then_some(if to.y % 2 == 0 {
+        (!blocked(to)).then_some(if to.y % 2 == 0 {
             30
         } else if diagonal {
             14

@@ -125,7 +125,7 @@ fn the_field_is_a_hex_lattice_and_not_a_square_one() {
 // ---------------------------------------------------------------------------------------------
 
 /// Whether a unit may stand on a cell at all. The door is the only tile that moves.
-fn passable<'a>(terrain: &'a CellMap<Tile>, unlocked: bool) -> impl Fn(Idx) -> bool + 'a {
+fn passable(terrain: &CellMap<Tile>, unlocked: bool) -> impl Fn(Idx) -> bool + '_ {
     move |i| terrain[i].cost(unlocked).is_some()
 }
 

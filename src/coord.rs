@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 /// exists so the arithmetic above can be done in `i64` — where it cannot wrap — without the cast
 /// home reintroducing the very wrap we widened to avoid.
 fn clamp_u32(d: i64) -> u32 {
-    d.clamp(0, i64::from(u32::MAX)) as u32
+    u32::try_from(d.max(0)).unwrap_or(u32::MAX)
 }
 
 /// How a grid measures distance — and, if it can, how to enumerate a neighbourhood without
@@ -321,25 +321,23 @@ fn square_deltas(r: u32, metric: fn(Sq, Sq) -> u32) -> Vec<(Sq, u32)> {
 impl Metric<Sq> {
     /// `|dx| + |dy|`. Four-way movement: range 1 is a plus sign, range 2 a diamond.
     pub const MANHATTAN: Self = Self::tabulated(
-        |a, b| a.manhattan(b),
+        Sq::manhattan,
         |r| count_centered(2, r),
-        |r| square_deltas(r, |a, b| a.manhattan(b)),
+        |r| square_deltas(r, Sq::manhattan),
     )
     .with_lerp(sq_lerp);
 
     /// `max(|dx|, |dy|)`. Eight-way movement: range 1 is the eight surrounding cells.
-    pub const CHEBYSHEV: Self = Self::tabulated(
-        |a, b| a.chebyshev(b),
-        count_chebyshev,
-        |r| square_deltas(r, |a, b| a.chebyshev(b)),
-    )
+    pub const CHEBYSHEV: Self = Self::tabulated(Sq::chebyshev, count_chebyshev, |r| {
+        square_deltas(r, Sq::chebyshev)
+    })
     .with_lerp(sq_lerp);
 }
 
 impl Metric<Hex> {
     /// Cube distance on a hex lattice.
     pub const HEX: Self = Self::tabulated(
-        |a, b| a.distance(b),
+        Hex::distance,
         |r| count_centered(3, r),
         |r| {
             let reach = i64::from(r).min(i64::from(i32::MAX));

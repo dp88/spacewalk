@@ -1,11 +1,11 @@
 //! Acceptance test: a tactical battle on a square grid — the classic turn-based tactics shape,
 //! where units with a movement allowance take turns crossing terrain to reach and strike.
 //!
-//! These port BattleCore's `tests/movement_rules.rs`, which is the behaviour a tactics game needs
+//! These port `BattleCore`'s `tests/movement_rules.rs`, which is the behaviour a tactics game needs
 //! and the reason `MovementRules` exists over there. The point of porting them is to prove the
 //! generic crate did not lose anything on the way out.
 //!
-//! Two of BattleCore's ten tests deliberately do *not* come across: "units path through allies but
+//! Two of `BattleCore`'s ten tests deliberately do *not* come across: "units path through allies but
 //! cannot stop on them" and "allies can be made to block". Those are about *who* blocks, which is
 //! occupancy, which is a game concept. The grid answers *reach*; the game filters *destinations*.
 

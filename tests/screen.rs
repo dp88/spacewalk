@@ -203,7 +203,7 @@ fn anywhere_inside_a_cell_picks_that_cell_not_merely_the_centre() {
 
             for (i, &corner) in corners.iter().enumerate() {
                 let edge = corners[(i + 1) % 6];
-                let mid = Pt::new((corner.x + edge.x) / 2.0, (corner.y + edge.y) / 2.0);
+                let mid = Pt::new(corner.x.midpoint(edge.x), corner.y.midpoint(edge.y));
 
                 for t in [0.1f32, 0.5, 0.9] {
                     for target in [corner, mid] {
@@ -589,7 +589,7 @@ fn drawing_a_line_and_picking_a_cell_agree() {
             let line = g.line(ia, ib);
 
             let (pa, pb) = (l.center(a), l.center(b));
-            let mid = Pt::new((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0);
+            let mid = Pt::new(pa.x.midpoint(pb.x), pa.y.midpoint(pb.y));
             let picked = l.hex_at(mid);
 
             // The midpoint pixel lands on (or immediately beside) the middle cell of the line. Ties

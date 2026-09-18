@@ -241,6 +241,8 @@ fn a_cell_map_survives_only_when_the_cells_that_fix_its_order_are_saved_with_it(
 
 #[test]
 fn a_whole_game_state_round_trips_through_coordinates() {
+    use spacewalk::Movement;
+
     // What a save file actually looks like: the grid is rebuilt from its own definition, and the
     // game's state is keyed by coordinate. The grid itself is never serialized — it is geometry,
     // and geometry is cheaper to rebuild than to store.
@@ -261,7 +263,6 @@ fn a_whole_game_state_round_trips_through_coordinates() {
     assert_eq!(before, after);
 
     // And it is usable against a freshly built grid, which is the actual test.
-    use spacewalk::Movement;
     let walls = after.walls.clone();
     let m = Movement::scan(&g, |s| (!walls.contains(&g.coord(s.to))).then_some(10));
 

@@ -166,8 +166,11 @@ impl<F> Movement<F> {
 
     /// Fallibly scan every edge on the board to find the cheapest legal step.
     ///
-    /// This has the same measurement and validation as [`Movement::scan`], but returns a
-    /// [`MovementError`] when a cost could make a path total overflow [`Cost`].
+    /// This has the same measurement and validation as [`Movement::scan`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MovementError`] when a cost could make a path total overflow [`Cost`].
     pub fn try_scan<B: Grid + ?Sized>(g: &B, enter: F) -> Result<Self, MovementError>
     where
         F: Fn(Step<B::Cell>) -> Option<Cost>,
@@ -299,6 +302,8 @@ impl Movement<()> {
     }
 
     /// Fallibly build uniform movement without scanning the board.
+    ///
+    /// # Errors
     ///
     /// Returns [`MovementError`] if `cost` is too large for a path on this board to accumulate
     /// safely.
@@ -514,8 +519,8 @@ mod tests {
         for n in 0..4u32 {
             let want = 2 * n * (n + 1) + 1;
             assert_eq!(
-                g.reachable(centre, n * 10, &m).len() as u32,
-                want,
+                g.reachable(centre, n * 10, &m).len(),
+                want as usize,
                 "budget {n}"
             );
         }

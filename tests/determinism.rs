@@ -1,7 +1,7 @@
 //! The same question, asked twice, must get the same answer.
 //!
 //! A tactics game that replays a battle from a seed, or an AI search that must not wobble, needs
-//! every query here to be a pure function of its inputs. The danger is hash order: BattleCore's
+//! every query here to be a pure function of its inputs. The danger is hash order: `BattleCore`'s
 //! `find_path_toward` picks the closest reachable cell out of a `HashMap`, so when two cells tie it
 //! chooses whichever the hasher happened to yield first — and a chasing enemy dithers between two
 //! equally good squares from run to run.

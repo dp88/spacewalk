@@ -2,7 +2,7 @@
 //!
 //! Rivers, conveyor belts, and ledges you can drop off but not climb back up. None of these can be
 //! said by an engine whose movement cost is a property of the cell — which is most of them, and
-//! which is what BattleCore does. Attaching the cost to the *crossing* rather than the *cell* is a
+//! which is what `BattleCore` does. Attaching the cost to the *crossing* rather than the *cell* is a
 //! small change to the model, and it is the difference between "mud is slow" and "the current runs
 //! south".
 //!

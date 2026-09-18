@@ -1,6 +1,6 @@
 //! A\* must return the *cheapest* path, not merely a path.
 //!
-//! This is the regression test BattleCore never had, for a bug it still has. Its A\* heuristic
+//! This is the regression test `BattleCore` never had, for a bug it still has. Its A\* heuristic
 //! charges one movement point per remaining step, on the stated grounds that "terrain can only make
 //! a step cost *more* than 1.0" — and then its own terrain table gives a road a cost of 0.5. The
 //! heuristic overestimates, A\* stops being admissible, and it quietly returns non-optimal paths
@@ -21,8 +21,8 @@ fn terrain(seed: u64, len: usize, costs: &[Cost]) -> Vec<Cost> {
     (0..len)
         .map(|_| {
             s = s
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             costs[(s >> 33) as usize % costs.len()]
         })
         .collect()

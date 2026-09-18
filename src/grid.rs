@@ -631,7 +631,7 @@ pub trait Grid: sealed::Sealed {
         // positions by scanning the board instead. This keeps the answer exact without making work
         // proportional to a coordinate a caller supplied.
         let distance = self.distance(lo, hi);
-        if distance > self.len() as u32 {
+        if distance as usize > self.len() {
             let mut cells: Vec<(u32, Idx)> = self
                 .indices()
                 .filter_map(|j| {

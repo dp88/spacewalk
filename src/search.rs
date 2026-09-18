@@ -40,6 +40,11 @@ fn add(a: u64, b: u64) -> u64 {
     a.saturating_add(b).min(CEILING)
 }
 
+/// A running total as a [`Cost`]. [`add`] keeps every total at or below [`Cost::MAX`].
+fn as_cost(total: u64) -> Cost {
+    Cost::try_from(total).unwrap_or(Cost::MAX)
+}
+
 /// One node waiting to be expanded, and what reaching it is estimated to cost in total.
 ///
 /// # The ordering, and what it is actually for
@@ -174,7 +179,7 @@ impl Frontier {
         nodes.reverse();
         Route {
             nodes,
-            cost: self.cost[goal as usize] as Cost,
+            cost: as_cost(self.cost[goal as usize]),
         }
     }
 }
@@ -246,7 +251,7 @@ where
         if frontier.is_stale(&v) {
             continue;
         }
-        reached.push((v.at, v.cost as Cost));
+        reached.push((v.at, as_cost(v.cost)));
 
         // No heuristic: a search with nowhere in particular to be has nothing to estimate.
         for (to, step) in edges(v.at) {

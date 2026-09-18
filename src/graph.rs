@@ -182,10 +182,13 @@ impl<K: Copy + Eq + Hash + fmt::Debug> Graph<K> {
 
     /// Fallibly build a graph from its edges: `(from, to, cost)`.
     ///
-    /// This numbers and checks the edges as [`Graph::new`] does, but returns a [`GraphError`] when
-    /// the edges name more than [`MAX_CELLS`] nodes, or when an edge costs so much that a path
-    /// total could overflow [`Cost`]. The ceiling is `Cost::MAX / (nodes - 1)`, because no simple
-    /// path visits a node twice.
+    /// This numbers and checks the edges as [`Graph::new`] does.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`GraphError`] when the edges name more than [`MAX_CELLS`] nodes, or when an edge
+    /// costs so much that a path total could overflow [`Cost`]. The ceiling is
+    /// `Cost::MAX / (nodes - 1)`, because no simple path visits a node twice.
     pub fn try_new(edges: impl IntoIterator<Item = (K, K, Cost)>) -> Result<Self, GraphError> {
         let mut keys = Vec::new();
         let mut index = HashMap::new();
@@ -195,12 +198,14 @@ impl<K: Copy + Eq + Hash + fmt::Debug> Graph<K> {
             }
             // Checked as we go, as `FullGrid::try_new` does: an edge list that never ends must
             // stop here, not after it has been counted.
-            if keys.len() as u64 >= MAX_CELLS {
-                return Err(GraphError::TooManyNodes {
-                    nodes: keys.len() as u64 + 1,
-                });
-            }
-            let n = keys.len() as u32;
+            let n = match u32::try_from(keys.len()) {
+                Ok(n) if u64::from(n) < MAX_CELLS => n,
+                _ => {
+                    return Err(GraphError::TooManyNodes {
+                        nodes: keys.len() as u64 + 1,
+                    });
+                }
+            };
             index.insert(key, n);
             keys.push(key);
             Ok(n)
@@ -244,9 +249,9 @@ impl<K: Copy + Eq + Hash + fmt::Debug> Graph<K> {
         Idx::new(self.tag, n)
     }
 
-    /// Check that `i` belongs to this graph, and turn it into a slot in the graph's own tables.
+    /// Check that `i` belongs to this graph, and hand back its number.
     #[track_caller]
-    fn slot(&self, i: Idx) -> usize {
+    fn slot(&self, i: Idx) -> u32 {
         debug_assert!(
             i.tag().agrees(self.tag),
             "node {i} was issued by a different graph or grid than the one being asked \
@@ -258,7 +263,7 @@ impl<K: Copy + Eq + Hash + fmt::Debug> Graph<K> {
             "node {i} is not in this graph, which has {} nodes",
             self.len(),
         );
-        i.raw() as usize
+        i.raw()
     }
 
     /// How many nodes the graph has.
@@ -300,12 +305,12 @@ impl<K: Copy + Eq + Hash + fmt::Debug> Graph<K> {
     /// If `i` is not a node of this graph.
     #[must_use]
     pub fn key(&self, i: Idx) -> K {
-        self.keys[self.slot(i)]
+        self.keys[self.slot(i) as usize]
     }
 
     /// Every node index, in order.
     pub fn indices(&self) -> impl Iterator<Item = Idx> + '_ {
-        (0..self.keys.len() as u32).map(|n| self.idx(n))
+        (0u32..).take(self.keys.len()).map(|n| self.idx(n))
     }
 
     /// Every node's key, in index order.
@@ -329,7 +334,7 @@ impl<K: Copy + Eq + Hash + fmt::Debug> Graph<K> {
     /// If `start` or `goal` is not a node of this graph.
     #[must_use]
     pub fn path(&self, start: Idx, goal: Idx) -> Option<Path> {
-        let (from, to) = (self.slot(start) as u32, self.slot(goal) as u32);
+        let (from, to) = (self.slot(start), self.slot(goal));
 
         let route = search::astar(self.len(), from, to, |n| self.out.row(n), |_| 0)?;
         let steps = route.nodes.into_iter().map(|n| self.idx(n)).collect();
@@ -345,7 +350,7 @@ impl<K: Copy + Eq + Hash + fmt::Debug> Graph<K> {
     /// If `start` is not a node of this graph.
     #[must_use]
     pub fn reachable(&self, start: Idx, budget: Cost) -> Vec<(Idx, Cost)> {
-        let from = self.slot(start) as u32;
+        let from = self.slot(start);
         let (found, _) = search::explore(self.len(), from, budget, |n| self.out.row(n));
         self.minted(found)
     }
@@ -360,7 +365,7 @@ impl<K: Copy + Eq + Hash + fmt::Debug> Graph<K> {
     /// If `goal` is not a node of this graph.
     #[must_use]
     pub fn reaching(&self, goal: Idx, budget: Cost) -> Vec<(Idx, Cost)> {
-        let to = self.slot(goal) as u32;
+        let to = self.slot(goal);
         let (found, _) = search::explore(self.len(), to, budget, |n| self.back.row(n));
         self.minted(found)
     }

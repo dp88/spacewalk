@@ -205,10 +205,13 @@ impl<C: Coord> FullGrid<C> {
 
     /// Fallibly build a grid from any set of cells, direction alphabet, and distance metric.
     ///
-    /// This has the same duplicate handling, ordering, and validation as [`FullGrid::new`], but
-    /// returns a [`GridError`] instead of panicking for invalid dimensions, oversized boards, a
-    /// metric that disagrees with the direction alphabet, or a step that cannot be undone.
+    /// This has the same duplicate handling, ordering, and validation as [`FullGrid::new`].
     /// Allocation failure is not recoverable.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`GridError`] where [`FullGrid::new`] panics: for an oversized board, a metric
+    /// that disagrees with the direction alphabet, or a step that cannot be undone.
     pub fn try_new(
         cells: impl IntoIterator<Item = C>,
         dirs: &[C::Dir],
@@ -422,12 +425,14 @@ impl FullGrid<Sq> {
 
     /// Fallibly build a square-cell rectangle.
     ///
+    /// # Errors
+    ///
     /// Returns [`GridError`] for negative dimensions or a rectangle larger than [`MAX_CELLS`].
     pub fn try_square(w: i32, h: i32, adj: Adjacency) -> Result<Self, GridError> {
         if w < 0 || h < 0 {
             return Err(GridError::InvalidDimensions { w, h });
         }
-        let cells_count = w as u64 * h as u64;
+        let cells_count = u64::from(w.unsigned_abs()) * u64::from(h.unsigned_abs());
         if cells_count > MAX_CELLS {
             return Err(GridError::TooManyCells { cells: cells_count });
         }
@@ -483,6 +488,8 @@ impl FullGrid<Sq> {
 
     /// Fallibly build an origin-centred disc of square cells.
     ///
+    /// # Errors
+    ///
     /// Returns [`GridError`] for a negative radius or when the disc's conservative bounding box
     /// exceeds [`MAX_CELLS`].
     pub fn try_disc(radius: i32, adj: Adjacency) -> Result<Self, GridError> {
@@ -494,7 +501,7 @@ impl FullGrid<Sq> {
         // on a side, which squares to 8.6 billion short of `u64::MAX` — it fits, but only just. One
         // integer width narrower it wraps, the guard waves the radius through, and the loop below
         // walks four billion rows.
-        let side = 2 * radius as u64 + 1;
+        let side = 2 * u64::from(radius.unsigned_abs()) + 1;
         let cells_count = side * side;
         if cells_count > MAX_CELLS {
             return Err(GridError::TooManyCells { cells: cells_count });
@@ -533,12 +540,14 @@ impl FullGrid<Hex> {
 
     /// Fallibly build a centred hexagon.
     ///
+    /// # Errors
+    ///
     /// Returns [`GridError`] for a negative radius or a hexagon larger than [`MAX_CELLS`].
     pub fn try_hexagon(radius: i32) -> Result<Self, GridError> {
         if radius < 0 {
             return Err(GridError::InvalidRadius { radius });
         }
-        let r = radius as u64;
+        let r = u64::from(radius.unsigned_abs());
         let cells_count = 3 * r * (r + 1) + 1;
         if cells_count > MAX_CELLS {
             return Err(GridError::TooManyCells { cells: cells_count });
@@ -584,12 +593,14 @@ impl FullGrid<Hex> {
 
     /// Fallibly build a rectangular field of hex cells.
     ///
+    /// # Errors
+    ///
     /// Returns [`GridError`] for negative dimensions or a rectangle larger than [`MAX_CELLS`].
     pub fn try_hex_rect(w: i32, h: i32, offset: Offset) -> Result<Self, GridError> {
         if w < 0 || h < 0 {
             return Err(GridError::InvalidDimensions { w, h });
         }
-        let cells_count = w as u64 * h as u64;
+        let cells_count = u64::from(w.unsigned_abs()) * u64::from(h.unsigned_abs());
         if cells_count > MAX_CELLS {
             return Err(GridError::TooManyCells { cells: cells_count });
         }
@@ -715,13 +726,9 @@ mod tests {
 
     #[test]
     fn a_hexagon_of_radius_r_has_the_centred_hexagonal_number_of_cells() {
-        // 1, 7, 19, 37: 3r(r+1) + 1.
-        for r in 0..4 {
-            assert_eq!(
-                FullGrid::hexagon(r).len() as i32,
-                3 * r * (r + 1) + 1,
-                "radius {r}"
-            );
+        // 3r(r+1) + 1.
+        for (r, cells) in [(0, 1), (1, 7), (2, 19), (3, 37)] {
+            assert_eq!(FullGrid::hexagon(r).len(), cells, "radius {r}");
         }
     }
 
@@ -744,8 +751,8 @@ mod tests {
         for o in OFFSETS {
             for (w, h) in [(1, 1), (1, 7), (7, 1), (5, 4), (9, 8)] {
                 assert_eq!(
-                    FullGrid::hex_rect(w, h, o).len() as i32,
-                    w * h,
+                    FullGrid::hex_rect(w, h, o).len(),
+                    usize::try_from(w * h).unwrap(),
                     "{o:?} {w}x{h}"
                 );
             }
