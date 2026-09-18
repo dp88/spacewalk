@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.1 — 2026-09-17
+
+- The `hashbrown` dependency moves from 0.16 to 0.17. Nothing else changes.
+
 ## 0.3.0 — 2026-09-17
 
 - **Breaking:** `FullGrid` no longer stores a step table or a reverse table. It
