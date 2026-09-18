@@ -8,3 +8,8 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      # The `@1.88.0` pin is the MSRV job. A bump there would test a newer
+      # toolchain while Cargo.toml still promises 1.88, and nothing would fail.
+      # Bump it by hand, together with `rust-version`.
+      - dependency-name: "dtolnay/rust-toolchain"
