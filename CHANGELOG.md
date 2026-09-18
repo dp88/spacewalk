@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.0 — 2026-09-17
+
 - **Breaking:** `FullGrid` no longer stores a step table or a reverse table. It
   keeps the coordinates and the index over them, and computes each step from
   the coordinate. A stored board drops from about 134 bytes a cell to about 34

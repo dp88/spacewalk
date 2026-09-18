@@ -8,16 +8,16 @@
 ![MSRV](https://img.shields.io/badge/rust-1.88%2B-blue)
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-The geometry instrument for operations conducted on a lattice — board games,
-tactics games, and tile maps: cells, directions, distance, sight, regions,
-and routes. Pieces, terrain, players, and the game clock remain under the
-command of your application.
+The geometry instrument for operations conducted on a lattice, such as board
+games, tactics games, and tile maps: cells, directions, distance, sight,
+regions, and routes. Pieces, terrain, players, and the game clock remain under
+the command of your application.
 
-## Quick start
+## 🚀 Quick start
 
 ```toml
 [dependencies]
-spacewalk = "0.2"
+spacewalk = "0.3"
 ```
 
 ```rust
@@ -39,30 +39,29 @@ assert_eq!(route.len(), 14);
 assert_eq!(route.cells(&grid).count(), 15); // the start is included
 ```
 
-## Why
+## 👨‍🚀 Mission Objectives
 
-- **One vocabulary, whole board or part.** Code written against the `Grid`
-  trait runs on a board you built (`FullGrid`) or a borrowed region of one
-  (`SubGrid`) without a change of course.
-- **Any shape.** Square, hex, disc, and tile-map hex rectangles ship as
-  constructors; a custom `Coord` implementation opens anything else,
-  including three-dimensional boards.
-- **Directed movement costs.** A step's cost belongs to the cell entered and
-  the direction of arrival — rivers, conveyors, and ledges just work. A*,
+- Code written against the `Grid` trait runs on a board you built
+  (`FullGrid`) or on a borrowed region of one (`SubGrid`) without a change of
+  course.
+- Square, hex, disc, and tile-map hex rectangles ship as constructors. A
+  custom `Coord` implementation opens anything else, including
+  three-dimensional boards.
+- A step's cost belongs to the cell entered and the direction of arrival, so
+  a river, a conveyor, or a one-way ledge needs no special case. A*,
   budget-bounded Dijkstra, and reverse reachability search the graph with
   deterministic tie-breaking. A `Graph` runs the same searches over nodes you
   name yourself, from a plain list of edges, with no grid at all.
-- **Sight and regions come back as boards.** Range, ring, component, and
-  field-of-view queries return a `SubGrid`, so the thing you highlight is
-  also the thing you path over.
-- **Height is yours, and it still works.** Elevation belongs beside your
-  terrain, in a `CellMap`, not in the grid. `height::height_gate` says what a
-  hill hides and `height::climb_gate` what a ledge refuses, both composing
-  with the closures you already pass.
-- **Integer pathfinding, reproducible replays.** Floats exist only in the
-  screen-layout layer; no float ever reaches a cost, a metric, or a step.
+- Range, ring, component, and field-of-view queries return a `SubGrid`, so
+  the thing you highlight is also the thing you path over.
+- Elevation lives in a `CellMap` beside your terrain. `height::height_gate`
+  says what a hill hides and `height::climb_gate` what a ledge refuses, and
+  both compose with the closures you already pass.
+- Pathfinding is integer arithmetic, so a replay reproduces. Floats exist
+  only in the screen-layout layer, and no float ever reaches a cost, a
+  metric, or a step.
 
-## Requirements and features
+## 👨‍🚀 Requirements and features
 
 - Rust 1.88 or newer, edition 2024.
 - `#![no_std]` with `alloc`; one runtime dependency (`hashbrown`).
@@ -71,17 +70,17 @@ assert_eq!(route.cells(&grid).count(), 15); // the start is included
 - Safety caps bound untrusted map files: `MAX_CELLS` is 2²⁴ cells and
   `MAX_SIGHT` is 64. Panicking constructors have `try_` counterparts.
 
-## More examples and documentation
+## 🧑‍🚀 More examples and documentation
 
-- [API documentation](https://docs.rs/spacewalk) — rustdoc is the manual:
+- [API documentation](https://docs.rs/spacewalk): rustdoc is the manual, with
   the `Grid` vocabulary, cost models, metrics, index identity, and layouts.
-- [`tests/`](tests/) — public-API missions: square tactics, checkers, hex
-  capture, three-dimensional chess, field of view, directed threats,
-  save/load, and robustness at hostile numeric limits.
+- [`tests/`](tests/): public-API missions, from square tactics, checkers, hex
+  capture, and three-dimensional chess to field of view, directed threats,
+  save and load, and robustness at hostile numeric limits.
 - [CHANGELOG](CHANGELOG.md)
 - [Issue tracker](https://github.com/dp88/spacewalk/issues)
 
-## License
+## 👩‍⚖️ License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
